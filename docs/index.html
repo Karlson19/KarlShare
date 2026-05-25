@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Karlshare</title>
+<meta name="description" content="Karlshare moves big files straight from one phone to another with no internet and no data. Built in Ghana." />
+<meta property="og:title" content="Karlshare" />
+<meta property="og:description" content="Big files, phone to phone, with the internet switched off." />
+<meta name="theme-color" content="#F7F4EE" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --orange:#FF6B1A; --magenta:#D81E5B; --purple:#6B21D9; --gold:#FFB627;
+    --ink:#141312; --paper:#F7F4EE; --paper-2:#EFE9DE; --line:#1c1b1a;
+    --mut:#6b665e;
+    --mono:'JetBrains Mono', ui-monospace, monospace;
+    --disp:'Space Grotesk', sans-serif;
+    --body:'Inter', system-ui, sans-serif;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body { background:var(--paper); color:var(--ink); font-family:var(--body); -webkit-font-smoothing:antialiased; }
+  a { color:inherit; text-decoration:none; }
+  .col { width:min(1160px, 92vw); margin-inline:auto; }
+  .eyebrow { font-family:var(--mono); font-size:12px; letter-spacing:.22em; text-transform:uppercase; color:var(--mut); }
+  h1,h2,h3 { font-family:var(--disp); letter-spacing:-.03em; line-height:.96; }
+
+  /* woven strip used as section rules */
+  .kente { height:14px; background:
+      repeating-linear-gradient(90deg, var(--orange) 0 18px, transparent 18px 60px),
+      repeating-linear-gradient(90deg, var(--magenta) 30px 40px, transparent 40px 78px),
+      repeating-linear-gradient(90deg, var(--purple) 9px 15px, transparent 15px 54px),
+      var(--gold);
+  }
+
+  /* top bar */
+  .bar { display:flex; align-items:baseline; justify-content:space-between; padding:26px 0 22px; border-bottom:2px solid var(--line); }
+  .mark { font-family:var(--disp); font-weight:700; font-size:24px; letter-spacing:-.04em; }
+  .mark b { color:var(--magenta); }
+  .bar nav { font-family:var(--mono); font-size:13px; letter-spacing:.06em; }
+
+  /* hero */
+  .hero { display:grid; grid-template-columns:1.25fr .85fr; gap:0; border-bottom:2px solid var(--line); }
+  .hero .left { padding:64px 56px 64px 0; }
+  .hero h1 { font-size:clamp(46px, 7.4vw, 96px); font-weight:700; }
+  .hero h1 .o { color:var(--orange); } .hero h1 .m { color:var(--magenta); } .hero h1 .p { color:var(--purple); }
+  .hero .lead { font-size:clamp(17px,1.9vw,21px); line-height:1.55; max-width:46ch; margin-top:28px; color:#34302b; }
+  .actions { margin-top:38px; display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
+  .go { display:inline-block; background:var(--ink); color:var(--paper); font-family:var(--mono); font-weight:700; font-size:15px; letter-spacing:.02em; padding:18px 28px; }
+  .go:hover { background:var(--magenta); }
+  .fine { font-family:var(--mono); font-size:12.5px; color:var(--mut); letter-spacing:.04em; }
+  .panel { border-left:2px solid var(--line); background:#161513;
+      background-image:
+        repeating-linear-gradient(0deg, var(--orange) 0 10px, transparent 10px 64px),
+        repeating-linear-gradient(0deg, var(--purple) 34px 50px, transparent 50px 96px),
+        repeating-linear-gradient(90deg, var(--magenta) 0 10px, transparent 10px 64px),
+        repeating-linear-gradient(90deg, var(--gold) 34px 50px, transparent 50px 96px);
+      position:relative; min-height:420px; }
+  .panel .tag { position:absolute; left:0; bottom:0; right:0; background:var(--ink); color:var(--paper); font-family:var(--mono); font-size:13px; padding:14px 18px; letter-spacing:.04em; }
+  .panel .tag b { color:var(--gold); }
+
+  /* stat band */
+  .band { background:var(--ink); color:var(--paper); }
+  .band .col { display:grid; grid-template-columns:repeat(3,1fr); }
+  .stat { padding:48px 30px; border-right:1px solid #2c2a27; }
+  .stat:last-child { border-right:0; }
+  .stat .n { font-family:var(--mono); font-weight:700; font-size:clamp(40px,6vw,64px); line-height:1; }
+  .stat .n.o{color:var(--orange);} .stat .n.m{color:var(--magenta);} .stat .n.g{color:var(--gold);}
+  .stat .k { margin-top:14px; font-size:15px; color:#cfc9bf; max-width:24ch; }
+
+  /* features */
+  .feat { padding:90px 0; }
+  .feat h2 { font-size:clamp(30px,4.4vw,46px); font-weight:600; max-width:18ch; margin:10px 0 60px; }
+  .rows { border-top:2px solid var(--line); }
+  .row { display:grid; grid-template-columns:120px 1fr; gap:28px; padding:34px 0; border-bottom:2px solid var(--line); }
+  .row .idx { font-family:var(--mono); font-weight:700; font-size:34px; color:var(--magenta); }
+  .row:nth-child(2) .idx{color:var(--orange);} .row:nth-child(3) .idx{color:var(--purple);}
+  .row:nth-child(4) .idx{color:var(--gold);} .row:nth-child(5) .idx{color:var(--magenta);} .row:nth-child(6) .idx{color:var(--orange);}
+  .row h3 { font-size:25px; font-weight:600; margin-bottom:10px; }
+  .row p { font-size:17px; line-height:1.6; max-width:62ch; color:#34302b; }
+
+  /* steps */
+  .steps { background:var(--paper-2); border-block:2px solid var(--line); padding:80px 0; }
+  .steps .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:0; margin-top:48px; }
+  .step { padding:0 32px; border-left:2px solid var(--line); }
+  .step:first-child { padding-left:0; border-left:0; }
+  .step .s { font-family:var(--mono); font-weight:700; font-size:15px; color:var(--purple); letter-spacing:.1em; }
+  .step h3 { font-size:23px; font-weight:600; margin:14px 0 10px; }
+  .step p { font-size:16px; line-height:1.6; color:#34302b; }
+
+  /* download */
+  .dl { background:var(--orange); color:var(--ink); border-bottom:2px solid var(--line); }
+  .dl .col { padding:84px 0; display:grid; grid-template-columns:1fr auto; gap:40px; align-items:center; }
+  .dl h2 { font-size:clamp(34px,5vw,60px); font-weight:700; }
+  .dl p { font-size:18px; margin-top:16px; max-width:40ch; line-height:1.5; }
+  .dl .go { background:var(--ink); color:var(--paper); white-space:nowrap; }
+  .dl .go:hover { background:#fff; color:var(--ink); }
+
+  /* faq */
+  .faq { padding:88px 0; }
+  .faq h2 { font-size:clamp(30px,4.4vw,46px); font-weight:600; margin-bottom:48px; }
+  .qa { display:grid; grid-template-columns:repeat(2,1fr); gap:40px 56px; }
+  .qa .q { font-family:var(--disp); font-weight:600; font-size:20px; margin-bottom:8px; }
+  .qa .a { font-size:16px; line-height:1.6; color:#34302b; }
+
+  footer { background:var(--ink); color:#cfc9bf; }
+  footer .col { padding:46px 0; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; }
+  footer .mark { color:var(--paper); }
+  footer nav { font-family:var(--mono); font-size:13px; }
+  footer nav a { margin-left:22px; }
+
+  @media (max-width:860px) {
+    .hero { grid-template-columns:1fr; }
+    .hero .left { padding:48px 0; }
+    .panel { border-left:0; border-top:2px solid var(--line); min-height:280px; }
+    .band .col, .steps .grid, .qa { grid-template-columns:1fr; }
+    .stat { border-right:0; border-bottom:1px solid #2c2a27; }
+    .step { border-left:0; padding:0; margin-bottom:36px; }
+    .row { grid-template-columns:64px 1fr; gap:16px; }
+    .dl .col { grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="kente"></div>
+
+<div class="col">
+  <div class="bar">
+    <span class="mark">Karl<b>share</b></span>
+    <nav><a href="#get">[ download ]</a></nav>
+  </div>
+</div>
+
+<div class="col">
+  <section class="hero">
+    <div class="left">
+      <p class="eyebrow">Offline file sharing / Kumasi, Ghana</p>
+      <h1>Big files,<br>phone to <span class="m">phone</span>,<br>internet <span class="o">off</span>.</h1>
+      <p class="lead">Karlshare moves your photos, videos, songs and whole apps straight onto the phone beside you. It runs on the WiFi radios already sitting in both phones, so you spend zero data and you do not need any signal at all.</p>
+      <div class="actions">
+        <a class="go" href="#get">Download for Android</a>
+        <span class="fine">free // no ads // ~8MB install</span>
+      </div>
+    </div>
+    <div class="panel" aria-hidden="true">
+      <div class="tag">two phones talking. <b>nothing in between.</b></div>
+    </div>
+  </section>
+</div>
+
+<div class="band">
+  <div class="col">
+    <div class="stat"><div class="n o">0</div><div class="k">MB of mobile data spent on a transfer</div></div>
+    <div class="stat"><div class="n m">0</div><div class="k">ads, countdowns or fake boost buttons</div></div>
+    <div class="stat"><div class="n g">~60</div><div class="k">MB every second between two Android phones</div></div>
+  </div>
+</div>
+
+<div class="col">
+  <section class="feat">
+    <p class="eyebrow">What makes it worth switching</p>
+    <h2>Old sharing apps stopped trying. We did not.</h2>
+    <div class="rows">
+      <div class="row"><div class="idx">01</div><div><h3>Speed you can feel</h3><p>Every file is cut into pieces and pushed across a 5GHz WiFi Direct link several pieces at a time. Two Android phones usually settle between 40 and 80 MB a second. A two hour film lands before you have found somewhere to sit.</p></div></div>
+      <div class="row"><div class="idx">02</div><div><h3>Your bundle stays full</h3><p>The internet never enters the picture. The two phones talk to each other and no one else, so there is no upload, no server, and nothing taken off your data plan.</p></div></div>
+      <div class="row"><div class="idx">03</div><div><h3>Locked, end to end</h3><p>Every link runs on TLS 1.3, and each phone confirms the other really is who it claims to be the first time they meet. No one can slip into the middle and read what you send.</p></div></div>
+      <div class="row"><div class="idx">04</div><div><h3>It crosses the divide</h3><p>Android to Android works today. The iPhone side, including the awkward iPhone to Android handoff that other apps fumble, is in the workshop next.</p></div></div>
+      <div class="row"><div class="idx">05</div><div><h3>Nothing in the way</h3><p>No banner ads. No timers. No video you sit through before you are allowed to send one photo. You open it, you send, you close it.</p></div></div>
+      <div class="row"><div class="idx">06</div><div><h3>Drawn from Kente</h3><p>The look borrows from Ghanaian cloth instead of the same stock icons every other app reaches for. It feels like it was made here, because it was.</p></div></div>
+    </div>
+  </section>
+</div>
+
+<div class="steps">
+  <div class="col">
+    <p class="eyebrow">Getting started</p>
+    <div class="grid">
+      <div class="step"><div class="s">01 / INSTALL</div><h3>Put it on your phone</h3><p>Grab the file below and install. Your phone asks you to allow it because it did not arrive through the Play Store. That is expected.</p></div>
+      <div class="step"><div class="s">02 / OPEN BOTH</div><h3>Open it on both phones</h3><p>The sender and the receiver both open Karlshare. You show up on each other's radar straight away. No codes to type, though a QR is there if you prefer it.</p></div>
+      <div class="step"><div class="s">03 / SEND</div><h3>Pick it and send</h3><p>Choose your photos, videos, songs or apps, tap the person, and watch it go. Each file is checked on arrival so you know it came through clean.</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="dl" id="get">
+  <div class="col">
+    <div>
+      <h2>Get Karlshare</h2>
+      <p>Android is ready now. iPhone is coming. It is free, and it stays free.</p>
+    </div>
+    <a class="go" href="https://github.com/Karlson19/KarlShare/releases/latest/download/karlshare.apk">Download the APK</a>
+  </div>
+</div>
+
+<div class="col">
+  <section class="faq">
+    <h2>Questions people ask</h2>
+    <div class="qa">
+      <div><div class="q">Is it actually free?</div><div class="a">Yes. No paid tier, no trial that runs out, no features held back. The whole app is free.</div></div>
+      <div><div class="q">Will it eat my data?</div><div class="a">No. Transfers go straight between the two phones over their own WiFi link, so your data bundle is never touched.</div></div>
+      <div><div class="q">Is my stuff safe?</div><div class="a">Files move over an encrypted link and never pass through a server. We do not see what you send, and nobody else on the network can either.</div></div>
+      <div><div class="q">Why does my phone warn me?</div><div class="a">Because we hand out the file directly for now instead of through the Play Store. Allow the install when asked. A store listing is on the way.</div></div>
+      <div><div class="q">Does it work with iPhone?</div><div class="a">Android to Android works today. iPhone support is being built next.</div></div>
+      <div><div class="q">Who made this?</div><div class="a">Karlson, a student in Kumasi who got tired of ad-stuffed sharing apps and built the one he wanted to use.</div></div>
+    </div>
+  </section>
+</div>
+
+<footer>
+  <div class="col">
+    <span class="mark">Karl<b style="color:var(--gold)">share</b></span>
+    <nav>
+      <a href="#">Privacy</a>
+      <a href="#">Terms</a>
+      <a href="https://github.com/Karlson19/KarlShare">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>
