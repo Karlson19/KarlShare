@@ -101,6 +101,9 @@ final class TransferEngine: NSObject, FlutterStreamHandler {
                 trustStore.forget(deviceId: id)
             }
             result(nil)
+        case "forgetAllPeers":
+            trustStore.forgetAll()
+            result(nil)
         default:
             result(FlutterMethodNotImplemented)
         }

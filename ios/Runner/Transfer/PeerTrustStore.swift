@@ -46,5 +46,11 @@ final class PeerTrustStore {
         defaults.removeObject(forKey: key(deviceId))
     }
 
+    func forgetAll() {
+        for k in defaults.dictionaryRepresentation().keys where k.hasPrefix(keyPrefix) {
+            defaults.removeObject(forKey: k)
+        }
+    }
+
     private func key(_ id: UUID) -> String { keyPrefix + id.uuidString }
 }

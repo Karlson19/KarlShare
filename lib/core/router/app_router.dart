@@ -10,6 +10,7 @@ import '../../features/transfer/presentation/transfer_screen.dart';
 import '../../features/transfer/presentation/transfer_complete_screen.dart';
 import '../../features/history/presentation/history_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
+import '../../features/settings/presentation/legal_screen.dart';
 import '../../features/qr_pair/presentation/qr_pair_screen.dart';
 
 final appRouter = GoRouter(
@@ -58,6 +59,14 @@ final appRouter = GoRouter(
     GoRoute(
       path: RoutePaths.qrPair,
       builder: (context, state) => const QrPairScreen(),
+    ),
+    GoRoute(
+      path: RoutePaths.privacy,
+      builder: (context, state) => const PrivacyScreen(),
+    ),
+    GoRoute(
+      path: RoutePaths.terms,
+      builder: (context, state) => const TermsScreen(),
     ),
   ],
 );

@@ -140,6 +140,7 @@ class TransferEngine(
                     result.success(null)
                 }
             }
+            "forgetAllPeers" -> { trustStore.forgetAll(); result.success(null) }
             else -> result.notImplemented()
         }
     }

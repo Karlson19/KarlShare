@@ -23,7 +23,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    _timer = Timer(const Duration(milliseconds: 2000), _goNext);
+    // Hold long enough to actually watch the Kente strands weave into the
+    // Sankofa mark, then the wordmark and tagline settle.
+    _timer = Timer(const Duration(milliseconds: 2800), _goNext);
   }
 
   void _goNext() {

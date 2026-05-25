@@ -10,6 +10,7 @@ import '../../../core/widgets/gradient_text.dart';
 import '../../../core/widgets/karlshare_avatar.dart';
 import '../../../core/widgets/karlshare_bottom_sheet.dart';
 import '../../../core/widgets/karlshare_button.dart';
+import '../../../core/widgets/kente_pattern.dart';
 import '../../../models/device.dart';
 import '../../../providers/user_provider.dart';
 import '../../transfer/providers/transfer_provider.dart';
@@ -110,7 +111,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ],
       ),
-      body: SafeArea(
+      body: Stack(
+        children: [
+          // Kente weave watermark behind the radar so the brand DNA is present
+          // on the screen people spend the most time on.
+          const Positioned.fill(
+            child: IgnorePointer(
+              child: KentePattern(opacity: 0.09, cell: 64),
+            ),
+          ),
+          SafeArea(
         child: Column(
           children: [
             Expanded(
@@ -163,6 +173,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ],
         ),
+      ),
+        ],
       ),
     );
   }

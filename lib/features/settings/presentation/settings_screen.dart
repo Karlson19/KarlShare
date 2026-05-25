@@ -10,6 +10,7 @@ import '../../../providers/analytics_provider.dart';
 import '../../../providers/theme_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../history/providers/history_provider.dart';
+import '../../transfer/providers/transfer_provider.dart';
 
 /// Settings (Section 6.7). Grouped cards with monochrome accent icons and
 /// a hairline-bordered row hierarchy. Premium upsell intentionally absent —
@@ -47,7 +48,7 @@ class SettingsScreen extends ConsumerWidget {
                 icon: Icons.language_rounded,
                 label: 'Language',
                 trailing: const _ValuePill(text: 'English'),
-                onTap: () => _comingSoon(context, 'Twi, Ga, Ewe & French'),
+                onTap: null,
               ),
             ],
           ),
@@ -57,16 +58,9 @@ class SettingsScreen extends ConsumerWidget {
             children: [
               _SettingsRow(
                 icon: Icons.folder_open_rounded,
-                label: 'Default save location',
+                label: 'Received files are saved to',
                 trailing: const _ValuePill(text: 'Karlshare/'),
-                onTap: () => _comingSoon(context, 'Custom folders'),
-              ),
-              const _SettingsDivider(),
-              _ToggleRow(
-                icon: Icons.verified_user_rounded,
-                label: 'Auto-accept from known devices',
-                value: false,
-                onChanged: (_) => _comingSoon(context, 'Trusted devices'),
+                onTap: null,
               ),
             ],
           ),
@@ -91,7 +85,7 @@ class SettingsScreen extends ConsumerWidget {
               _SettingsRow(
                 icon: Icons.devices_other_rounded,
                 label: 'Reset paired devices',
-                onTap: () => _comingSoon(context, 'Pairing memory'),
+                onTap: () => _confirmResetPaired(context, ref),
               ),
             ],
           ),
@@ -115,13 +109,13 @@ class SettingsScreen extends ConsumerWidget {
               _SettingsRow(
                 icon: Icons.policy_outlined,
                 label: 'Privacy Policy',
-                onTap: () => _comingSoon(context, 'Privacy policy'),
+                onTap: () => context.push(RoutePaths.privacy),
               ),
               const _SettingsDivider(),
               _SettingsRow(
                 icon: Icons.description_outlined,
                 label: 'Terms',
-                onTap: () => _comingSoon(context, 'Terms'),
+                onTap: () => context.push(RoutePaths.terms),
               ),
             ],
           ),
@@ -130,9 +124,30 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  void _comingSoon(BuildContext context, String label) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$label arrives in v1.1')),
+  void _confirmResetPaired(BuildContext context, WidgetRef ref) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reset paired devices?'),
+        content: const Text(
+            'Karlshare will forget every device it has trusted before. They will be treated as new the next time you connect.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              ref.read(transferServiceProvider).forgetAllPeers();
+              Navigator.of(ctx).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Paired devices reset')),
+              );
+            },
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
     );
   }
 

@@ -10,7 +10,8 @@ final sharedPreferencesProvider = Provider<SharedPreferences>(
 const _themeModeKey = 'theme_mode';
 
 /// Holds the user's selected [ThemeMode], persisted to SharedPreferences.
-/// Defaults to dark mode per the spec (Section 5.5).
+/// Defaults to system (Auto) on first launch so the app matches each phone's
+/// own light/dark setting. A user's explicit choice is always remembered.
 class ThemeModeNotifier extends StateNotifier<ThemeMode> {
   ThemeModeNotifier(this._prefs) : super(_load(_prefs));
 
@@ -20,8 +21,8 @@ class ThemeModeNotifier extends StateNotifier<ThemeMode> {
     final stored = prefs.getString(_themeModeKey);
     return switch (stored) {
       'light' => ThemeMode.light,
-      'system' => ThemeMode.system,
-      _ => ThemeMode.dark,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
     };
   }
 

@@ -131,6 +131,12 @@ class TransferService {
     await _method.invokeMethod<void>('cancel', {'transferId': transferId});
   }
 
+  /// Clears every trusted-peer fingerprint (Settings ▸ Reset paired devices).
+  Future<void> forgetAllPeers() async {
+    if (!isPlatformSupported) return;
+    await _method.invokeMethod<void>('forgetAllPeers');
+  }
+
   Stream<TransferEvent> events() {
     if (!isPlatformSupported) return const Stream.empty();
     return _cached ??= _events
