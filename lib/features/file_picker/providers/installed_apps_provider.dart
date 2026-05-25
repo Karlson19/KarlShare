@@ -1,3 +1,4 @@
+import 'dart:convert' show base64Decode;
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
@@ -15,6 +16,7 @@ class InstalledApp {
     required this.apkPath,
     required this.sizeBytes,
     required this.versionName,
+    this.iconBytes,
   });
 
   final String packageName;
@@ -22,6 +24,9 @@ class InstalledApp {
   final String apkPath;
   final int sizeBytes;
   final String versionName;
+
+  /// The app's launcher icon as PNG bytes, for display in the picker grid.
+  final Uint8List? iconBytes;
 
   TransferFile toTransferFile() => TransferFile(
         id: packageName,
@@ -51,6 +56,7 @@ final installedAppsProvider =
               apkPath: row['sourceApkPath'] as String? ?? '',
               sizeBytes: (row['sizeBytes'] as num?)?.toInt() ?? 0,
               versionName: row['versionName'] as String? ?? '',
+              iconBytes: _decodeIcon(row['iconPng'] as String?),
             ))
         .where((a) => a.apkPath.isNotEmpty)
         .toList(growable: false);
@@ -58,3 +64,12 @@ final installedAppsProvider =
     return const [];
   }
 });
+
+Uint8List? _decodeIcon(String? b64) {
+  if (b64 == null || b64.isEmpty) return null;
+  try {
+    return base64Decode(b64);
+  } catch (_) {
+    return null;
+  }
+}

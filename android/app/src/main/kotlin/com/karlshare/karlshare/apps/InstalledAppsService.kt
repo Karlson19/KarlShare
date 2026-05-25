@@ -3,7 +3,12 @@ package com.karlshare.karlshare.apps
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.os.Build
+import android.util.Base64
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -13,6 +18,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.File
 
 /**
@@ -91,9 +97,32 @@ class InstalledAppsService(
                     "sourceApkPath" to apk,
                     "sizeBytes" to apkFile.length(),
                     "versionName" to (pkg.versionName ?: ""),
+                    "iconPng" to iconBase64(app, pm),
                 )
             }
             .sortedBy { (it["label"] as? String)?.lowercase() }
             .toList()
+    }
+
+    /** Renders the app's launcher icon to a small PNG, base64-encoded for the
+     *  Flutter side to show in the grid. Null if anything goes wrong. */
+    private fun iconBase64(app: ApplicationInfo, pm: PackageManager): String? = try {
+        val bmp = drawableToBitmap(pm.getApplicationIcon(app), 96)
+        val out = ByteArrayOutputStream()
+        bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+        Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+    } catch (_: Throwable) {
+        null
+    }
+
+    private fun drawableToBitmap(drawable: Drawable, sizePx: Int): Bitmap {
+        if (drawable is BitmapDrawable) {
+            drawable.bitmap?.let { return Bitmap.createScaledBitmap(it, sizePx, sizePx, true) }
+        }
+        val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        drawable.setBounds(0, 0, canvas.width, canvas.height)
+        drawable.draw(canvas)
+        return bmp
     }
 }

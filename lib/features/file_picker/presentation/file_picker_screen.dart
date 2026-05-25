@@ -100,7 +100,10 @@ class _FilePickerScreenState extends ConsumerState<FilePickerScreen>
             Positioned(
               left: AppConstants.space16,
               right: AppConstants.space16,
-              bottom: AppConstants.space16,
+              // Lift above the system navigation bar / gesture pill so the
+              // gradient Send bar never blends into the OS nav buttons.
+              bottom: AppConstants.space16 +
+                  MediaQuery.viewPaddingOf(context).bottom,
               child: _SummaryCard(
                 count: count,
                 bytes: selectionApi.totalBytes,
@@ -346,20 +349,118 @@ class _AppsTab extends ConsumerWidget {
                 "App sharing is Android-only.\nInstall on Android to share APKs.",
           );
         }
-        return ListView.builder(
-          padding:
-              const EdgeInsets.only(top: AppConstants.space8, bottom: 120),
+        final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+        return GridView.builder(
+          padding: EdgeInsets.fromLTRB(
+            AppConstants.space16,
+            AppConstants.space16,
+            AppConstants.space16,
+            120 + bottomInset,
+          ),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 4,
+            mainAxisSpacing: AppConstants.space20,
+            crossAxisSpacing: AppConstants.space12,
+            childAspectRatio: 0.70,
+          ),
           itemCount: apps.length,
           itemBuilder: (context, i) {
-            final file = apps[i].toTransferFile();
-            return FileListTile(
-              file: file,
+            final app = apps[i];
+            final file = app.toTransferFile();
+            return _AppTile(
+              app: app,
               selected: isSelected(file.id),
-              onToggle: () => onToggle(file),
+              onTap: () => onToggle(file),
             );
           },
         );
       },
+    );
+  }
+}
+
+/// One app in the Apps grid: real launcher icon, name and size, Xender-style.
+class _AppTile extends StatelessWidget {
+  const _AppTile({required this.app, required this.selected, required this.onTap});
+
+  final InstalledApp app;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).extension<KarlshareColors>()!;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              AnimatedContainer(
+                duration: AppConstants.microInteraction,
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(AppConstants.radiusSmall + 4),
+                  border: Border.all(
+                    color: selected ? colors.accent : Colors.transparent,
+                    width: 2,
+                  ),
+                ),
+                padding: const EdgeInsets.all(2),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(AppConstants.radiusSmall + 2),
+                  child: app.iconBytes != null
+                      ? Image.memory(app.iconBytes!, width: 52, height: 52,
+                          fit: BoxFit.cover, gaplessPlayback: true)
+                      : Container(
+                          color: colors.accentSoft,
+                          child: Icon(Icons.android, color: colors.accent),
+                        ),
+                ),
+              ),
+              if (selected)
+                Positioned(
+                  top: -4,
+                  right: -4,
+                  child: Container(
+                    width: 20,
+                    height: 20,
+                    decoration: BoxDecoration(
+                      color: colors.accent,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: colors.background, width: 2),
+                    ),
+                    child: const Icon(Icons.check_rounded,
+                        color: Colors.white, size: 12),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: AppConstants.space8),
+          Text(
+            app.label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: colors.textPrimary,
+                  height: 1.15,
+                  fontSize: 12,
+                ),
+          ),
+          Text(
+            FormatUtils.fileSize(app.sizeBytes),
+            style: Theme.of(context)
+                .textTheme
+                .labelSmall
+                ?.copyWith(color: colors.textTertiary, fontSize: 10),
+          ),
+        ],
+      ),
     );
   }
 }
