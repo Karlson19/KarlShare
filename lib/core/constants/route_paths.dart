@@ -10,6 +10,8 @@ class RoutePaths {
   static const String filePicker = '/file-picker';
   static const String transfer = '/transfer';
   static const String transferComplete = '/transfer/complete';
+  static const String receive = '/receive';
+  static const String sendConnect = '/send-connect';
   static const String history = '/history';
   static const String settings = '/settings';
   static const String qrPair = '/qr-pair';

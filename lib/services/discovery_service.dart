@@ -4,6 +4,8 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'desktop/lan_beacon.dart';
+
 /// Native discovery event types emitted on `karlshare/discovery/events`.
 enum DiscoveryEventType { peerFound, peerLost, groupReady, error }
 
@@ -14,29 +16,37 @@ class DiscoveredPeer {
     required this.name,
     required this.signalStrength,
     required this.isAvailable,
+    this.platform = 'unknown',
   });
 
-  /// MAC address of the peer (used as `deviceAddress` for connect calls).
+  /// Routing key for the peer. On WiFi Direct this is the MAC; on the LAN
+  /// beacon path it is the peer's IP address.
   final String address;
 
   /// Human-facing name advertised by the peer.
   final String name;
 
-  /// 0–100; rough proximity heuristic from WifiP2pDevice status.
+  /// 0–100; rough proximity heuristic.
   final int signalStrength;
 
   final bool isAvailable;
+
+  /// Operating system advertised by the peer: 'android', 'ios', 'windows',
+  /// 'linux', 'macos', or 'unknown'. Drives the OS badge on the radar.
+  final String platform;
 
   DiscoveredPeer copyWith({
     String? name,
     int? signalStrength,
     bool? isAvailable,
+    String? platform,
   }) =>
       DiscoveredPeer(
         address: address,
         name: name ?? this.name,
         signalStrength: signalStrength ?? this.signalStrength,
         isAvailable: isAvailable ?? this.isAvailable,
+        platform: platform ?? this.platform,
       );
 
   @override
@@ -45,10 +55,12 @@ class DiscoveredPeer {
       other.address == address &&
       other.name == name &&
       other.signalStrength == signalStrength &&
-      other.isAvailable == isAvailable;
+      other.isAvailable == isAvailable &&
+      other.platform == platform;
 
   @override
-  int get hashCode => Object.hash(address, name, signalStrength, isAvailable);
+  int get hashCode =>
+      Object.hash(address, name, signalStrength, isAvailable, platform);
 }
 
 @immutable
@@ -106,46 +118,71 @@ class DiscoveryService {
   final MethodChannel _method;
   final EventChannel _events;
   Stream<DiscoveryEvent>? _cached;
+  LanBeacon? _beacon;
 
-  /// True when the running platform implements the native bridge.
-  bool get isPlatformSupported =>
+  /// Mobile uses the native WiFi Direct / Multipeer bridge.
+  bool get _channelSupported =>
       !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
+  /// Desktop uses the pure-Dart LAN beacon (Windows / Linux / macOS).
+  bool get _isDesktop =>
+      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+
+  LanBeacon _ensureBeacon() => _beacon ??= LanBeacon();
+
+  /// True when discovery works on this platform at all.
+  bool get isPlatformSupported => _channelSupported || _isDesktop;
+
   Future<bool> isSupported() async {
-    if (!isPlatformSupported) return false;
+    if (_isDesktop) return true;
+    if (!_channelSupported) return false;
     return (await _method.invokeMethod<bool>('isSupported')) ?? false;
   }
 
   Future<void> start() async {
-    if (!isPlatformSupported) return;
+    if (_isDesktop) {
+      await _ensureBeacon().start();
+      return;
+    }
+    if (!_channelSupported) return;
     await _method.invokeMethod<void>('start');
   }
 
   Future<void> stop() async {
-    if (!isPlatformSupported) return;
+    if (_isDesktop) {
+      await _beacon?.stop();
+      return;
+    }
+    if (!_channelSupported) return;
     await _method.invokeMethod<void>('stop');
   }
 
   Future<void> createGroup() async {
-    if (!isPlatformSupported) return;
+    if (_isDesktop) return; // no group-owner concept on the LAN path
+    if (!_channelSupported) return;
     await _method.invokeMethod<void>('createGroup');
   }
 
   Future<void> connect(String deviceAddress) async {
-    if (!isPlatformSupported) return;
+    if (_isDesktop) {
+      _ensureBeacon().connect(deviceAddress);
+      return;
+    }
+    if (!_channelSupported) return;
     await _method.invokeMethod<void>('connect', {'deviceAddress': deviceAddress});
   }
 
   Future<void> disconnect() async {
-    if (!isPlatformSupported) return;
+    if (_isDesktop) return;
+    if (!_channelSupported) return;
     await _method.invokeMethod<void>('disconnect');
   }
 
-  /// Hot stream of native events. Cached so multiple subscribers share one
-  /// platform-side EventChannel — the channel itself broadcasts via the
-  /// native sink, but Dart still needs a broadcast wrapper for fan-out.
+  /// Hot stream of discovery events. On desktop this is the LAN beacon; on
+  /// mobile it is the native EventChannel (cached so subscribers fan out).
   Stream<DiscoveryEvent> events() {
-    if (!isPlatformSupported) return const Stream.empty();
+    if (_isDesktop) return _ensureBeacon().events;
+    if (!_channelSupported) return const Stream.empty();
     return _cached ??= _events
         .receiveBroadcastStream()
         .map(_parse)
@@ -164,6 +201,7 @@ class DiscoveryService {
           name: raw['name'] as String? ?? 'Unknown',
           signalStrength: (raw['signalStrength'] as num?)?.toInt() ?? 50,
           isAvailable: raw['isAvailable'] as bool? ?? true,
+          platform: raw['platform'] as String? ?? 'android',
         ));
       case 'peerLost':
         return DiscoveryEvent.peerLost(raw['address'] as String? ?? '');

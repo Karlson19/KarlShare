@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
+    <!-- Needed to receive UDP broadcast beacons for LAN discovery -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
 
     <!-- WiFi Direct + nearby-devices discovery -->
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
@@ -36,9 +38,9 @@
     <!-- Camera for QR pairing -->
     <uses-permission android:name="android.permission.CAMERA"/>
 
-    <!-- WiFi Direct requires WiFi hardware -->
+    <!-- Wi-Fi is needed; WiFi Direct is no longer required (LAN discovery) -->
     <uses-feature android:name="android.hardware.wifi" android:required="true"/>
-    <uses-feature android:name="android.hardware.wifi.direct" android:required="true"/>
+    <uses-feature android:name="android.hardware.wifi.direct" android:required="false"/>
 
     <application
         android:label="Karlshare"

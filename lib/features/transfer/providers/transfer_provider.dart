@@ -24,7 +24,15 @@ final selectedDeviceProvider = StateProvider<Device?>((ref) => null);
 /// available (no Android), [start] reports failure and the UI shows a graceful
 /// fallback.
 class ActiveTransferNotifier extends StateNotifier<Transfer?> {
-  ActiveTransferNotifier(this._ref) : super(null);
+  ActiveTransferNotifier(this._ref) : super(null) {
+    // Always listen, so INCOMING transfers (where we never called start)
+    // populate state and the UI can react. The receiver's server is started
+    // from the home screen.
+    final service = _ref.read(transferServiceProvider);
+    if (service.isPlatformSupported) {
+      _eventSub = service.events().listen(_onEvent);
+    }
+  }
 
   final Ref _ref;
   StreamSubscription<TransferEvent>? _eventSub;
@@ -42,8 +50,6 @@ class ActiveTransferNotifier extends StateNotifier<Transfer?> {
     required List<TransferFile> files,
     TransferDirection direction = TransferDirection.sent,
   }) async {
-    await _teardownSubscription();
-
     final service = _ref.read(transferServiceProvider);
     if (!service.isPlatformSupported) return false;
     final peerIp = device.ipAddress;
@@ -60,12 +66,8 @@ class ActiveTransferNotifier extends StateNotifier<Transfer?> {
         .toList();
     if (outgoing.isEmpty) return false;
 
-    // Subscribe before kicking off so we don't miss the first `started` event.
-    _eventSub = service.events().listen(_onEvent);
-
     final transferId = await service.sendFiles(peerIp: peerIp, files: outgoing);
     if (transferId == null) {
-      await _teardownSubscription();
       return false;
     }
     _activeTransferId = transferId;
@@ -212,17 +214,12 @@ class ActiveTransferNotifier extends StateNotifier<Transfer?> {
     if (id != null) {
       await _ref.read(transferServiceProvider).cancel(id);
     }
-    await _teardownSubscription();
+    // Keep the event subscription alive — it's our permanent receive listener.
     state = null;
+    _activeTransferId = null;
     _startedAt = null;
     _speedBytesPerSec = 0;
     _lastTotalBytes = 0;
-  }
-
-  Future<void> _teardownSubscription() async {
-    await _eventSub?.cancel();
-    _eventSub = null;
-    _activeTransferId = null;
   }
 
   @override

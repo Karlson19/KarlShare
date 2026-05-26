@@ -7,11 +7,12 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/avatar_presets.dart';
 import '../../../core/constants/route_paths.dart';
 import '../../../core/widgets/gradient_text.dart';
-import '../../../core/widgets/karlshare_avatar.dart';
 import '../../../core/widgets/karlshare_bottom_sheet.dart';
 import '../../../core/widgets/karlshare_button.dart';
 import '../../../core/widgets/kente_pattern.dart';
 import '../../../models/device.dart';
+import '../../../models/enums.dart';
+import '../../../models/transfer.dart';
 import '../../../providers/user_provider.dart';
 import '../../transfer/providers/transfer_provider.dart';
 import '../providers/discovery_provider.dart';
@@ -35,6 +36,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _noneTimer = Timer(const Duration(seconds: 10), () {
       if (mounted) setState(() => _waitedLongEnough = true);
     });
+    // Start listening for incoming transfers as soon as the radar is up, so
+    // any phone sitting on this screen can receive without tapping anything.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) startReceiving(ref);
+    });
   }
 
   @override
@@ -51,48 +57,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Future<void> _openReceive(String name) async {
-    // Become Group Owner + open the TCP server so a sender can dial in.
-    await ref.read(discoveryServiceProvider).createGroup();
-    await startReceiving(ref);
-
-    if (!mounted) return;
-    KarlshareBottomSheet.show(
-      context: context,
-      builder: (_) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          KarlshareAvatar(name: name, size: 72),
-          const SizedBox(height: AppConstants.space16),
-          Text('Ready to receive',
-              style: Theme.of(context).textTheme.headlineMedium),
-          const SizedBox(height: AppConstants.space8),
-          Text(
-            "You're discoverable as \"$name\". Ask a nearby friend to send.",
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: AppConstants.space24),
-          const SizedBox(
-            width: 32,
-            height: 32,
-            child: CircularProgressIndicator(strokeWidth: 3),
-          ),
-          const SizedBox(height: AppConstants.space24),
-        ],
-      ),
-    ).whenComplete(() async {
-      // Stop listening when the sheet is dismissed.
-      await stopReceiving(ref);
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final profile = ref.watch(userProfileProvider);
     final scanning = ref.watch(isScanningProvider);
     final devicesAsync = ref.watch(discoveredDevicesProvider);
     final devices = devicesAsync.valueOrNull ?? const <Device>[];
+
+    // An incoming transfer just started — jump to the transfer screen to show it.
+    ref.listen<Transfer?>(activeTransferProvider, (prev, next) {
+      if (next != null &&
+          next.direction == TransferDirection.received &&
+          prev == null) {
+        context.push(RoutePaths.transfer);
+      }
+    });
 
     return Scaffold(
       appBar: AppBar(
@@ -155,7 +134,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     child: KarlshareButton(
                       label: 'Send',
                       icon: Icons.arrow_upward_rounded,
-                      onPressed: () => context.push(RoutePaths.filePicker),
+                      onPressed: () {
+                        // Choosing recipient by scanning happens after picking
+                        // files, so clear any stale radar selection.
+                        ref.read(selectedDeviceProvider.notifier).state = null;
+                        context.push(RoutePaths.filePicker);
+                      },
                     ),
                   ),
                   const SizedBox(width: AppConstants.space16),
@@ -164,8 +148,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       label: 'Receive',
                       icon: Icons.arrow_downward_rounded,
                       variant: KarlshareButtonVariant.secondary,
-                      onPressed: () =>
-                          _openReceive(profile?.displayName ?? 'My Phone'),
+                      onPressed: () => context.push(RoutePaths.receive),
                     ),
                   ),
                 ],

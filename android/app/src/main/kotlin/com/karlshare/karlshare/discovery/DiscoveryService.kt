@@ -1,28 +1,31 @@
 package com.karlshare.karlshare.discovery
 
 import android.content.Context
+import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.BinaryMessenger
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Flutter platform-channel bridge over {@link WifiDirectManager}.
+ * Flutter platform-channel bridge over {@link LanDiscovery}.
  *
- * MethodChannel: `karlshare/discovery`
- *   - `isSupported`               → Bool
- *   - `start`                     → void
- *   - `stop`                      → void
- *   - `connect(deviceAddress)`    → void
- *   - `createGroup`               → void (receiver-side group owner)
+ * MethodChannel `karlshare/discovery`:
+ *   - `isSupported`            -> Bool
+ *   - `start` / `stop`         -> begin/end Wi-Fi LAN discovery
+ *   - `connect(deviceAddress)` -> no-op: the peer IP is already known from its
+ *                                 beacon, so the transfer engine dials directly
+ *   - `createGroup` / `disconnect` -> no-op (no group-owner step on the LAN path)
  *
- * EventChannel: `karlshare/discovery/events`
- *   Emits maps with `type` ∈ { peerFound, peerLost, groupReady, error }.
+ * EventChannel `karlshare/discovery/events`:
+ *   { type in peerFound | peerLost | error, ... }. A peerFound carries the
+ *   peer's `address` (its IP), `name`, `signalStrength`, `isAvailable`, `platform`.
  */
 class DiscoveryService(
     private val context: Context,
     messenger: BinaryMessenger,
+    deviceId: UUID,
 ) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
     companion object {
@@ -38,11 +41,13 @@ class DiscoveryService(
     }
 
     private var eventSink: EventChannel.EventSink? = null
-    private val peers = ConcurrentHashMap<String, WifiDirectManager.PeerDevice>()
-    private val wifiDirect: WifiDirectManager = WifiDirectManager(context, ListenerImpl())
+
+    // ip -> (name, platform), so we can replay peers when Dart re-subscribes.
+    private val peers = ConcurrentHashMap<String, Pair<String, String>>()
+    private val lan = LanDiscovery(context, deviceId, ListenerImpl())
 
     fun dispose() {
-        wifiDirect.stop()
+        lan.stop()
         methodChannel.setMethodCallHandler(null)
         eventChannel.setStreamHandler(null)
         eventSink = null
@@ -51,65 +56,49 @@ class DiscoveryService(
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "isSupported" -> result.success(wifiDirect.isSupported)
-            "start" -> {
-                wifiDirect.start()
-                wifiDirect.startDiscovery()
-                result.success(null)
-            }
-            "stop" -> {
-                wifiDirect.stopDiscovery()
-                result.success(null)
-            }
-            "createGroup" -> {
-                wifiDirect.createGroup()
-                result.success(null)
-            }
-            "connect" -> {
-                val address = call.argument<String>("deviceAddress")
-                if (address.isNullOrBlank()) {
-                    result.error("ARG", "deviceAddress required", null)
-                } else {
-                    wifiDirect.connectTo(address)
-                    result.success(null)
-                }
-            }
-            "disconnect" -> {
-                wifiDirect.disconnect()
-                result.success(null)
-            }
+            "isSupported" -> result.success(true)
+            "start" -> { lan.start(); result.success(null) }
+            "stop" -> { lan.stop(); peers.clear(); result.success(null) }
+            // The LAN path needs no group formation; the peer IP arrives with
+            // its beacon, so these are accepted no-ops for API compatibility.
+            "createGroup", "connect", "disconnect" -> result.success(null)
             else -> result.notImplemented()
         }
     }
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
         eventSink = events
-        // Replay any peers we'd already collected so the Dart side rebuilds state.
-        peers.values.forEach { emit("peerFound", it.toMap()) }
+        // Replay peers we already know so the radar repopulates instantly.
+        peers.forEach { (ip, info) ->
+            emit("peerFound", mapOf(
+                "address" to ip,
+                "name" to info.first,
+                "signalStrength" to 100,
+                "isAvailable" to true,
+                "platform" to info.second,
+            ))
+        }
     }
 
     override fun onCancel(arguments: Any?) {
         eventSink = null
     }
 
-    // ---- Listener wiring ---------------------------------------------------
-
-    private inner class ListenerImpl : WifiDirectManager.Listener {
-        override fun onPeerFound(device: WifiDirectManager.PeerDevice) {
-            peers[device.address] = device
-            emit("peerFound", device.toMap())
+    private inner class ListenerImpl : LanDiscovery.Listener {
+        override fun onPeerFound(address: String, name: String, platform: String) {
+            peers[address] = name to platform
+            emit("peerFound", mapOf(
+                "address" to address,
+                "name" to name,
+                "signalStrength" to 100,
+                "isAvailable" to true,
+                "platform" to platform,
+            ))
         }
 
-        override fun onPeerLost(deviceAddress: String) {
-            peers.remove(deviceAddress)
-            emit("peerLost", mapOf("address" to deviceAddress))
-        }
-
-        override fun onGroupReady(ownerIp: String, isGroupOwner: Boolean) {
-            emit(
-                "groupReady",
-                mapOf("ownerIp" to ownerIp, "isGroupOwner" to isGroupOwner),
-            )
+        override fun onPeerLost(address: String) {
+            peers.remove(address)
+            emit("peerLost", mapOf("address" to address))
         }
 
         override fun onError(stage: String, reason: Int) {
@@ -117,19 +106,11 @@ class DiscoveryService(
         }
     }
 
-    private fun WifiDirectManager.PeerDevice.toMap(): Map<String, Any> = mapOf(
-        "address" to address,
-        "name" to name,
-        "signalStrength" to signalStrength,
-        "isAvailable" to isAvailable,
-    )
-
     private fun emit(type: String, body: Map<String, Any>) {
+        val sink = eventSink ?: return
         val payload = HashMap<String, Any>(body.size + 1)
         payload["type"] = type
         payload.putAll(body)
-        // EventSink callbacks must run on the main thread.
-        val sink = eventSink ?: return
         android.os.Handler(context.mainLooper).post { sink.success(payload) }
     }
 }

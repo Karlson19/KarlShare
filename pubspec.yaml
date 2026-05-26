@@ -67,6 +67,8 @@ dependencies:
   uuid: ^4.4.0
   intl: ^0.19.0
   device_info_plus: ^10.1.0
+  crypto: ^3.0.3            # SHA-256 for the transfer protocol (desktop)
+  basic_utils: ^5.7.0      # self-signed TLS cert generation (desktop)
 
   # QR codes
   qr_flutter: ^4.1.0

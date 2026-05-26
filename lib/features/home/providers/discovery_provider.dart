@@ -94,6 +94,9 @@ Stream<List<Device>> _nativeDeviceStream(Ref ref) async* {
           angle: r.nextDouble() * 2 * math.pi,
           distance: 0.45 + r.nextDouble() * 0.5,
           address: peer.address,
+          // On the LAN path the address IS the peer's IP, so the transfer
+          // engine can dial it immediately with no group-owner negotiation.
+          ipAddress: peer.address,
         );
         controller.add(List<Device>.unmodifiable(byAddress.values));
         break;

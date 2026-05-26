@@ -3,6 +3,7 @@ package com.karlshare.karlshare
 import android.content.Context
 import com.karlshare.karlshare.apps.InstalledAppsService
 import com.karlshare.karlshare.discovery.DiscoveryService
+import com.karlshare.karlshare.discovery.HotspotManager
 import com.karlshare.karlshare.transfer.TransferEngine
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -13,20 +14,24 @@ class MainActivity : FlutterActivity() {
     private var discovery: DiscoveryService? = null
     private var transfer: TransferEngine? = null
     private var apps: InstalledAppsService? = null
+    private var hotspot: HotspotManager? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
         val messenger = flutterEngine.dartExecutor.binaryMessenger
-        discovery = DiscoveryService(applicationContext, messenger)
-        transfer = TransferEngine(applicationContext, messenger, deviceId(applicationContext))
+        val id = deviceId(applicationContext)
+        discovery = DiscoveryService(applicationContext, messenger, id)
+        transfer = TransferEngine(applicationContext, messenger, id)
         apps = InstalledAppsService(applicationContext, messenger)
+        hotspot = HotspotManager(applicationContext, messenger)
     }
 
     override fun onDestroy() {
         discovery?.dispose(); discovery = null
         transfer?.dispose(); transfer = null
         apps?.dispose(); apps = null
+        hotspot?.dispose(); hotspot = null
         super.onDestroy()
     }
 

@@ -8,6 +8,8 @@ import '../../features/home/presentation/home_screen.dart';
 import '../../features/file_picker/presentation/file_picker_screen.dart';
 import '../../features/transfer/presentation/transfer_screen.dart';
 import '../../features/transfer/presentation/transfer_complete_screen.dart';
+import '../../features/transfer/presentation/receive_screen.dart';
+import '../../features/transfer/presentation/send_connect_screen.dart';
 import '../../features/history/presentation/history_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
 import '../../features/settings/presentation/legal_screen.dart';
@@ -47,6 +49,14 @@ final appRouter = GoRouter(
     GoRoute(
       path: RoutePaths.transferComplete,
       builder: (context, state) => const TransferCompleteScreen(),
+    ),
+    GoRoute(
+      path: RoutePaths.receive,
+      builder: (context, state) => const ReceiveScreen(),
+    ),
+    GoRoute(
+      path: RoutePaths.sendConnect,
+      builder: (context, state) => const SendConnectScreen(),
     ),
     GoRoute(
       path: RoutePaths.history,

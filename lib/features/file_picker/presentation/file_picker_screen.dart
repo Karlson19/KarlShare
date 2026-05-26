@@ -59,7 +59,11 @@ class _FilePickerScreenState extends ConsumerState<FilePickerScreen>
     final selection = ref.read(fileSelectionProvider.notifier);
     if (selection.files.isEmpty) return;
     ref.read(selectedFilesProvider.notifier).state = selection.files;
-    context.push(RoutePaths.transfer);
+    final device = ref.read(selectedDeviceProvider);
+    final hasIp = device?.ipAddress != null && device!.ipAddress!.isNotEmpty;
+    // Recipient already known (tapped on the same-Wi-Fi radar) -> go straight
+    // to transfer. Otherwise scan the receiver's hotspot QR to connect.
+    context.push(hasIp ? RoutePaths.transfer : RoutePaths.sendConnect);
   }
 
   @override
