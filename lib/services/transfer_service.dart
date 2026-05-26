@@ -4,6 +4,8 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'desktop/dart_transfer_engine.dart';
+
 /// Spec for an outbound file the engine should send.
 @immutable
 class OutgoingFile {
@@ -94,22 +96,37 @@ class TransferService {
   final MethodChannel _method;
   final EventChannel _events;
   Stream<TransferEvent>? _cached;
+  DartTransferEngine? _engine;
 
-  bool get isPlatformSupported =>
+  bool get _channelSupported =>
       !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+  bool get _isDesktop =>
+      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+  DartTransferEngine _ensureEngine() => _engine ??= DartTransferEngine();
+
+  bool get isPlatformSupported => _channelSupported || _isDesktop;
 
   Future<void> startServer() async {
-    if (!isPlatformSupported) return;
+    if (_isDesktop) {
+      await _ensureEngine().startServer();
+      return;
+    }
+    if (!_channelSupported) return;
     await _method.invokeMethod<void>('startServer');
   }
 
   Future<void> stopServer() async {
-    if (!isPlatformSupported) return;
+    if (_isDesktop) {
+      await _ensureEngine().stopServer();
+      return;
+    }
+    if (!_channelSupported) return;
     await _method.invokeMethod<void>('stopServer');
   }
 
   Future<void> setSaveDir(String path) async {
-    if (!isPlatformSupported) return;
+    if (_isDesktop) return; // desktop engine manages its own save folder
+    if (!_channelSupported) return;
     await _method.invokeMethod<void>('setSaveDir', {'path': path});
   }
 
@@ -119,7 +136,8 @@ class TransferService {
     required String peerIp,
     required List<OutgoingFile> files,
   }) async {
-    if (!isPlatformSupported) return null;
+    if (_isDesktop) return _ensureEngine().sendFiles(peerIp, files);
+    if (!_channelSupported) return null;
     return _method.invokeMethod<String>('sendFiles', {
       'peerIp': peerIp,
       'files': files.map((f) => f.toMap()).toList(),
@@ -127,18 +145,27 @@ class TransferService {
   }
 
   Future<void> cancel(String transferId) async {
-    if (!isPlatformSupported) return;
+    if (_isDesktop) {
+      await _ensureEngine().cancel(transferId);
+      return;
+    }
+    if (!_channelSupported) return;
     await _method.invokeMethod<void>('cancel', {'transferId': transferId});
   }
 
   /// Clears every trusted-peer fingerprint (Settings ▸ Reset paired devices).
   Future<void> forgetAllPeers() async {
-    if (!isPlatformSupported) return;
+    if (_isDesktop) {
+      await _ensureEngine().forgetAllPeers();
+      return;
+    }
+    if (!_channelSupported) return;
     await _method.invokeMethod<void>('forgetAllPeers');
   }
 
   Stream<TransferEvent> events() {
-    if (!isPlatformSupported) return const Stream.empty();
+    if (_isDesktop) return _ensureEngine().events();
+    if (!_channelSupported) return const Stream.empty();
     return _cached ??= _events
         .receiveBroadcastStream()
         .map(_parse)

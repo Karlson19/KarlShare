@@ -90,10 +90,16 @@ class KarlshareKeystore(private val deviceId: UUID) {
         private const val ALIAS = "karlshare_identity"
         private const val KEYSTORE = "AndroidKeyStore"
 
-        /** SHA-256 of an X.509 cert's SubjectPublicKeyInfo (the DER public-key bytes). */
+        /**
+         * SHA-256 of the whole DER-encoded certificate. Chosen over the
+         * SubjectPublicKeyInfo because it is trivially identical to compute on
+         * the desktop (Dart) side too, which keeps the cross-platform handshake
+         * binding in sync. TLS transmits the exact same cert bytes, so both
+         * peers hash identical input.
+         */
         fun fingerprintFor(cert: X509Certificate): ByteArray {
             val md = MessageDigest.getInstance("SHA-256")
-            return md.digest(cert.publicKey.encoded)
+            return md.digest(cert.encoded)
         }
     }
 }
