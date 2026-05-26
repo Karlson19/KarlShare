@@ -114,6 +114,20 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
               : Column(
                   children: [
                     _Header(transfer: transfer, onCancel: _cancel),
+                    if (transfer.status == TransferStatus.failed &&
+                        notifier.lastError != null)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppConstants.space24,
+                          vertical: AppConstants.space8,
+                        ),
+                        child: Text(
+                          notifier.lastError!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              color: Theme.of(context).colorScheme.error),
+                        ),
+                      ),
                     Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppConstants.space16,

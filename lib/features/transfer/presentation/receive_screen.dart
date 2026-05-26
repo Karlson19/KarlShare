@@ -32,6 +32,7 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
   String? _ssid;
   String? _password;
   bool _error = false;
+  bool _ready = false; // desktop: listening, no hotspot to host
 
   @override
   void initState() {
@@ -40,17 +41,23 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
   }
 
   Future<void> _begin() async {
+    // Open the listening server on every platform.
+    await startReceiving(ref);
     final hotspot = ref.read(hotspotServiceProvider);
     if (!hotspot.isPlatformSupported) {
-      setState(() {
-        _status = 'Receiving over a hotspot only works on Android right now.';
-        _error = true;
-      });
+      // Desktop / non-Android: no app-hosted hotspot. Just be discoverable on
+      // the shared network and wait for an incoming transfer.
+      if (mounted) {
+        setState(() {
+          _ready = true;
+          _status =
+              "Ready to receive. You'll appear on the sender's radar when "
+              "they're on the same network. Keep this open.";
+        });
+      }
       return;
     }
     _sub = hotspot.events().listen(_onEvent);
-    // Be ready to accept the incoming connection.
-    await startReceiving(ref);
     await hotspot.startHotspot();
   }
 
@@ -125,7 +132,9 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
                     child: _error
                         ? Icon(Icons.error_outline_rounded,
                             size: 56, color: AppColors.error)
-                        : const CircularProgressIndicator(),
+                        : _ready
+                            ? Icon(Icons.wifi_rounded, size: 64, color: colors.accent)
+                            : const CircularProgressIndicator(),
                   ),
                 ),
               const SizedBox(height: AppConstants.space24),

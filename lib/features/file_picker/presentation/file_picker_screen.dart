@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,25 +31,32 @@ class FilePickerScreen extends ConsumerStatefulWidget {
 
 class _FilePickerScreenState extends ConsumerState<FilePickerScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: _order.length, vsync: this);
+  late final bool _isDesktop =
+      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
-  // Tab order per Section 6.4.
-  static const _order = [
-    KFileType.image,
-    KFileType.video,
-    KFileType.app,
-    KFileType.document,
-    KFileType.audio,
-  ];
+  // Desktop has no gallery/installed-apps, so only the Files tab applies there.
+  late final List<KFileType> _order = _isDesktop
+      ? const [KFileType.document]
+      : const [
+          KFileType.image,
+          KFileType.video,
+          KFileType.app,
+          KFileType.document,
+          KFileType.audio,
+        ];
+
+  late final TabController _tabs =
+      TabController(length: _order.length, vsync: this);
 
   @override
   void initState() {
     super.initState();
-    // Kick off the media permission flow as soon as the picker opens — the
-    // first tab needs gallery access.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      requestMediaPermission(ref);
-    });
+    if (!_isDesktop) {
+      // Mobile: kick off the gallery permission flow for the first tab.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        requestMediaPermission(ref);
+      });
+    }
   }
 
   @override
@@ -61,9 +71,18 @@ class _FilePickerScreenState extends ConsumerState<FilePickerScreen>
     ref.read(selectedFilesProvider.notifier).state = selection.files;
     final device = ref.read(selectedDeviceProvider);
     final hasIp = device?.ipAddress != null && device!.ipAddress!.isNotEmpty;
-    // Recipient already known (tapped on the same-Wi-Fi radar) -> go straight
-    // to transfer. Otherwise scan the receiver's hotspot QR to connect.
-    context.push(hasIp ? RoutePaths.transfer : RoutePaths.sendConnect);
+    if (hasIp) {
+      context.push(RoutePaths.transfer); // recipient already chosen on the radar
+      return;
+    }
+    if (_isDesktop) {
+      // No camera on desktop — recipient is chosen from the radar.
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Tap a device on the radar to choose who to send to.'),
+      ));
+      return;
+    }
+    context.push(RoutePaths.sendConnect); // phone: scan the receiver's QR
   }
 
   @override

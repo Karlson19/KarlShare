@@ -42,6 +42,10 @@ class ActiveTransferNotifier extends StateNotifier<Transfer?> {
   int _lastTotalBytes = 0;
   DateTime _lastSpeedSample = DateTime.fromMillisecondsSinceEpoch(0);
 
+  /// Last error message from the engine, shown on the transfer screen when a
+  /// transfer fails so problems are visible (no cable for logs).
+  String? lastError;
+
   /// Returns true when the transfer was successfully dispatched into the
   /// native engine. False → caller should surface an explanation (no
   /// recipient IP, platform unsupported, etc).
@@ -157,6 +161,7 @@ class ActiveTransferNotifier extends StateNotifier<Transfer?> {
         );
         break;
       case TransferEventType.error:
+        lastError = event.message;
         if (current == null) return;
         state = current.copyWith(
           status: TransferStatus.failed,
