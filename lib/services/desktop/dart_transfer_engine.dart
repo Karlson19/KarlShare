@@ -215,6 +215,11 @@ class DartTransferEngine {
           if (_cancelled.contains(transferId)) break;
           sentTotal = await _sendOne(socket, f, transferId, sentTotal, grand);
         }
+        // Graceful close so every queued chunk is delivered before the FIN —
+        // a hard destroy() here can truncate the last chunk and fail the
+        // receiver's checksum.
+        await socket.flush();
+        await socket.close();
         _emit(
           type: _cancelled.contains(transferId)
               ? TransferEventType.cancelled

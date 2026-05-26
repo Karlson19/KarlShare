@@ -118,7 +118,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               waitedLongEnough: _waitedLongEnough,
               platformSupported:
                   ref.watch(discoveryServiceProvider).isPlatformSupported,
-              onInvite: () => context.push(RoutePaths.qrPair),
+              onInvite: () => context.push(RoutePaths.receive),
             ),
             const SizedBox(height: AppConstants.space24),
             Padding(
@@ -182,7 +182,9 @@ class _StatusLine extends StatelessWidget {
   Widget build(BuildContext context) {
     if (deviceCount > 0) {
       return Text(
-        '$deviceCount ${deviceCount == 1 ? "device" : "devices"} nearby',
+        deviceCount == 1
+            ? 'Tap the device to send it files'
+            : 'Tap a device to send it files',
         style: Theme.of(context).textTheme.bodyLarge,
       );
     }
@@ -190,7 +192,7 @@ class _StatusLine extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: AppConstants.space24),
         child: Text(
-          'Karlshare uses WiFi Direct — install on an Android device to scan for peers.',
+          'Install Karlshare on Android or a PC on the same network to share.',
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodyMedium,
         ),
@@ -199,13 +201,25 @@ class _StatusLine extends StatelessWidget {
     if (waitedLongEnough && scanning) {
       return Column(
         children: [
-          Text('No one nearby.',
+          Text('No one nearby yet.',
               style: Theme.of(context).textTheme.bodyLarge),
+          const SizedBox(height: AppConstants.space4),
+          Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: AppConstants.space24),
+            child: Text(
+              "Open Karlshare on the other device, and make sure both are on "
+              "the same Wi-Fi — or turn on one phone's hotspot and connect the "
+              "other to it.",
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
           const SizedBox(height: AppConstants.space8),
           TextButton.icon(
             onPressed: onInvite,
             icon: const Icon(Icons.wifi_tethering_rounded),
-            label: const Text('Invite a friend'),
+            label: const Text('Share over hotspot'),
           ),
         ],
       );

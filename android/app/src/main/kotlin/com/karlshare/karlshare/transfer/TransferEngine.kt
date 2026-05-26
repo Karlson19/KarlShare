@@ -70,6 +70,9 @@ class TransferEngine(
         const val METHOD_CHANNEL = "karlshare/transfer"
         const val EVENT_CHANNEL = "karlshare/transfer/events"
         private const val TLS_PROTOCOL = "TLSv1.3"
+        // Allow 1.2 as well so the cross-platform handshake with the desktop
+        // (Dart/BoringSSL) negotiates reliably; both are strong.
+        private val TLS_PROTOCOLS = arrayOf("TLSv1.2", "TLSv1.3")
     }
 
     private val methodChannel = MethodChannel(messenger, METHOD_CHANNEL).also {
@@ -256,7 +259,7 @@ class TransferEngine(
             override fun checkServerTrusted(chain: Array<X509Certificate>?, authType: String?) {}
             override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
         })
-        return SSLContext.getInstance(TLS_PROTOCOL).apply {
+        return SSLContext.getInstance("TLS").apply {
             init(keystore.keyManagerFactory().keyManagers, trustAll, SecureRandom())
         }
     }
@@ -301,7 +304,7 @@ class TransferEngine(
                     .apply {
                         reuseAddress = true
                         bind(InetSocketAddress(KarlshareProtocol.TRANSFER_PORT))
-                        enabledProtocols = arrayOf(TLS_PROTOCOL)
+                        enabledProtocols = TLS_PROTOCOLS
                         needClientAuth = true
                     }
                 serverSocket = ssl
@@ -453,7 +456,7 @@ class TransferEngine(
             tcpNoDelay = true
             soTimeout = 60_000
             connect(InetSocketAddress(peerIp, KarlshareProtocol.TRANSFER_PORT), 15_000)
-            enabledProtocols = arrayOf(TLS_PROTOCOL)
+            enabledProtocols = TLS_PROTOCOLS
             startHandshake()
         }
         try {
