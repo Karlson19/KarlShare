@@ -28,6 +28,7 @@ class _SendConnectScreenState extends ConsumerState<SendConnectScreen> {
   bool _joining = false;
   bool _error = false;
   String _status = 'Point your camera at the receiver’s QR code.';
+  String? _pendingHostIp;
 
   @override
   void initState() {
@@ -45,16 +46,19 @@ class _SendConnectScreenState extends ConsumerState<SendConnectScreen> {
         setState(() => _status = e.message ?? _status);
         break;
       case HotspotEventType.joined:
-        final ip = e.gatewayIp;
-        if (ip == null || ip.isEmpty) return;
-        ref.read(selectedDeviceProvider.notifier).state = Device(
-          id: ip,
-          name: 'Receiving device',
-          status: DeviceStatus.ready,
-          address: ip,
-          ipAddress: ip,
-        );
-        if (mounted) context.pushReplacement(RoutePaths.transfer);
+        // Prefer the host IP from the QR; fall back to the network gateway.
+        final ip = (_pendingHostIp != null && _pendingHostIp!.isNotEmpty)
+            ? _pendingHostIp!
+            : e.gatewayIp;
+        if (ip == null || ip.isEmpty) {
+          setState(() {
+            _status = "Joined, but couldn't find the other device. Try again.";
+            _error = true;
+            _joining = false;
+          });
+          return;
+        }
+        _connectTo(ip);
         break;
       case HotspotEventType.joinError:
         setState(() {
@@ -82,14 +86,40 @@ class _SendConnectScreenState extends ConsumerState<SendConnectScreen> {
     if (data['k'] != 'karlshare') return;
     final ssid = data['s'] as String?;
     final pass = data['p'] as String?;
-    if (ssid == null || pass == null) return;
+    final hostIp = data['h'] as String?;
 
-    setState(() {
-      _joining = true;
-      _error = false;
-      _status = 'Joining $ssid…';
-    });
-    ref.read(hotspotServiceProvider).joinHotspot(ssid: ssid, password: pass);
+    // PC / same-network code: just an address — connect straight away, no join.
+    if ((ssid == null || pass == null) && hostIp != null && hostIp.isNotEmpty) {
+      setState(() {
+        _joining = true;
+        _error = false;
+        _status = 'Connecting…';
+      });
+      _connectTo(hostIp);
+      return;
+    }
+
+    // Phone-hotspot code: auto-join the network first, then connect to its host.
+    if (ssid != null && pass != null) {
+      setState(() {
+        _joining = true;
+        _error = false;
+        _pendingHostIp = (hostIp != null && hostIp.isNotEmpty) ? hostIp : null;
+        _status = 'Joining $ssid…';
+      });
+      ref.read(hotspotServiceProvider).joinHotspot(ssid: ssid, password: pass);
+    }
+  }
+
+  void _connectTo(String ip) {
+    ref.read(selectedDeviceProvider.notifier).state = Device(
+      id: ip,
+      name: 'Receiving device',
+      status: DeviceStatus.ready,
+      address: ip,
+      ipAddress: ip,
+    );
+    if (mounted) context.pushReplacement(RoutePaths.transfer);
   }
 
   @override

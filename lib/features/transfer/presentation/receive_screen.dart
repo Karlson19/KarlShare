@@ -13,12 +13,14 @@ import '../../../core/theme/app_gradients.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/enums.dart';
 import '../../../models/transfer.dart';
+import '../../../services/desktop/desktop_net.dart';
 import '../../../services/hotspot_service.dart';
 import '../providers/transfer_provider.dart';
 
-/// Receiver side of the offline (hotspot) flow: this phone becomes a Wi-Fi
-/// hotspot and shows a QR the sender scans to join. Status is shown live so
-/// any failure is visible on screen.
+/// Receiver side. The phone hosts a hotspot and shows a QR (network + its IP);
+/// the PC just shows a QR with its own IP (it's already on the shared network).
+/// Either way the sender scans this code and connects straight to the host —
+/// no radar, no typing.
 class ReceiveScreen extends ConsumerStatefulWidget {
   const ReceiveScreen({super.key});
 
@@ -27,12 +29,14 @@ class ReceiveScreen extends ConsumerStatefulWidget {
 }
 
 class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
+  static const int _port = 8988;
+
   StreamSubscription<HotspotEvent>? _sub;
-  String _status = 'Starting hotspot…';
+  String _status = 'Getting ready…';
   String? _ssid;
   String? _password;
+  String? _hostIp;
   bool _error = false;
-  bool _ready = false; // desktop: listening, no hotspot to host
 
   @override
   void initState() {
@@ -41,23 +45,27 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
   }
 
   Future<void> _begin() async {
-    // Open the listening server on every platform.
-    await startReceiving(ref);
+    await startReceiving(ref); // open the listening server on every platform
     final hotspot = ref.read(hotspotServiceProvider);
+
     if (!hotspot.isPlatformSupported) {
-      // Desktop / non-Android: no app-hosted hotspot. Just be discoverable on
-      // the shared network and wait for an incoming transfer.
-      if (mounted) {
-        setState(() {
-          _ready = true;
-          _status =
-              "Ready to receive. You'll appear on the sender's radar when "
-              "they're on the same network. Keep this open.";
-        });
-      }
+      // Desktop: no hotspot to host. Show a QR with this PC's IP so a phone
+      // already on the same network (or this PC's hotspot) can scan + connect.
+      await DesktopNet.ensureFirewallRule(_port);
+      final ip = await DesktopNet.localIPv4();
+      if (!mounted) return;
+      setState(() {
+        _hostIp = ip;
+        _error = ip == null;
+        _status = ip == null
+            ? "Couldn't find this PC's network address. Connect to a Wi-Fi or a phone's hotspot first."
+            : 'Scan this from your phone (Send, then Scan) to send files here.';
+      });
       return;
     }
+
     _sub = hotspot.events().listen(_onEvent);
+    setState(() => _status = 'Starting hotspot…');
     await hotspot.startHotspot();
   }
 
@@ -71,7 +79,8 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
         setState(() {
           _ssid = e.ssid;
           _password = e.password;
-          _status = 'Hotspot ready. Have the sender scan this code.';
+          _hostIp = (e.hostIp != null && e.hostIp!.isNotEmpty) ? e.hostIp : null;
+          _status = 'Have the other phone scan this (Send, then Scan).';
           _error = false;
         });
         break;
@@ -83,8 +92,24 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
         break;
       case HotspotEventType.joined:
       case HotspotEventType.joinError:
-        break; // joiner-side events
+        break;
     }
+  }
+
+  String? get _qrData {
+    if (_ssid != null && _password != null) {
+      return jsonEncode({
+        'k': 'karlshare',
+        's': _ssid,
+        'p': _password,
+        'h': _hostIp,
+        'port': _port,
+      });
+    }
+    if (_hostIp != null) {
+      return jsonEncode({'k': 'karlshare', 'h': _hostIp, 'port': _port});
+    }
+    return null;
   }
 
   @override
@@ -98,7 +123,6 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<KarlshareColors>()!;
 
-    // Jump to the transfer view the moment a file starts arriving.
     ref.listen<Transfer?>(activeTransferProvider, (prev, next) {
       if (next != null &&
           next.direction == TransferDirection.received &&
@@ -107,24 +131,22 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
       }
     });
 
-    final qrData = (_ssid != null && _password != null)
-        ? jsonEncode({'k': 'karlshare', 's': _ssid, 'p': _password})
-        : null;
+    final qr = _qrData;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Receive'),
-        leading: IconButton(icon: const Icon(Icons.close_rounded), onPressed: context.pop),
+        leading: IconButton(
+            icon: const Icon(Icons.close_rounded), onPressed: context.pop),
       ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(AppConstants.space24),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const Spacer(),
-              if (qrData != null)
-                _QrCard(data: qrData, colors: colors)
+              if (qr != null)
+                _QrCard(data: qr, colors: colors)
               else
                 SizedBox(
                   height: 240,
@@ -132,9 +154,7 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
                     child: _error
                         ? Icon(Icons.error_outline_rounded,
                             size: 56, color: AppColors.error)
-                        : _ready
-                            ? Icon(Icons.wifi_rounded, size: 64, color: colors.accent)
-                            : const CircularProgressIndicator(),
+                        : const CircularProgressIndicator(),
                   ),
                 ),
               const SizedBox(height: AppConstants.space24),
@@ -147,10 +167,8 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
               ),
               if (_ssid != null) ...[
                 const SizedBox(height: AppConstants.space8),
-                Text(
-                  'Network: $_ssid',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
+                Text('Network: $_ssid',
+                    style: Theme.of(context).textTheme.bodyMedium),
               ],
               const Spacer(),
               Text(

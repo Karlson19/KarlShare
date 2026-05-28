@@ -15,6 +15,7 @@ class HotspotEvent {
     this.ssid,
     this.password,
     this.gatewayIp,
+    this.hostIp,
     this.message,
   });
 
@@ -22,6 +23,10 @@ class HotspotEvent {
   final String? ssid;
   final String? password;
   final String? gatewayIp;
+
+  /// The host's own IP on the hotspot (put in the QR so the sender connects
+  /// straight to it, no gateway guessing).
+  final String? hostIp;
   final String? message;
 }
 
@@ -92,6 +97,7 @@ class HotspotService {
       ssid: raw['ssid'] as String?,
       password: raw['password'] as String?,
       gatewayIp: raw['gatewayIp'] as String?,
+      hostIp: raw['hostIp'] as String?,
       message: raw['message'] as String?,
     );
   }

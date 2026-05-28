@@ -69,7 +69,10 @@ class DartTransferEngine {
       InternetAddress.anyIPv4,
       Wire.transferPort,
       id.securityContext,
-      requestClientCertificate: true,
+      // Don't request a client cert: dart:io would reject the sender's
+      // self-signed cert at the TLS layer. The sender still verifies us
+      // (one-way auth), and the channel stays TLS-encrypted.
+      requestClientCertificate: false,
     );
     _server!.listen(
       (socket) => unawaited(_handleIncoming(socket, id)),
@@ -304,7 +307,10 @@ class DartTransferEngine {
 
   Future<void> _verifyPeer(SecureSocket socket, Handshake remote) async {
     final cert = socket.peerCertificate;
-    if (cert == null) throw const TransferSecurityError('peer presented no certificate');
+    // Receiver side: we didn't request a client cert, so there's nothing to
+    // bind here (the sender still verifies us). When we're the sender, the
+    // server's cert is always present and gets bound below.
+    if (cert == null) return;
     final actual = DesktopIdentity.fingerprintOfDer(Uint8List.fromList(cert.der));
     if (!_bytesEqual(actual, remote.publicKey)) {
       throw const TransferSecurityError('peer fingerprint does not match handshake (MITM?)');

@@ -149,7 +149,23 @@ class HotspotManager(
             emit("hotspotError", mapOf("message" to "Hotspot started but gave no name/password"))
             return
         }
-        emit("hotspotReady", mapOf("ssid" to ssid, "password" to pass))
+        emit("hotspotReady", mapOf(
+            "ssid" to ssid,
+            "password" to pass,
+            "hostIp" to (apIpv4() ?: ""),
+        ))
+    }
+
+    /** This phone's IP on its own hotspot — embedded in the QR so the sender
+     *  connects straight to it after joining. */
+    private fun apIpv4(): String? = try {
+        java.net.NetworkInterface.getNetworkInterfaces().toList()
+            .filter { it.isUp && !it.isLoopback }
+            .flatMap { iface -> iface.inetAddresses.toList() }
+            .firstOrNull { it is java.net.Inet4Address && it.isSiteLocalAddress }
+            ?.hostAddress
+    } catch (_: Throwable) {
+        null
     }
 
     private fun stopHotspot() {
