@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,14 +9,17 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/avatar_presets.dart';
 import '../../../core/constants/route_paths.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/gradient_text.dart';
 import '../../../core/widgets/karlshare_bottom_sheet.dart';
 import '../../../core/widgets/karlshare_button.dart';
+import '../../../core/widgets/karlshare_qr.dart';
 import '../../../core/widgets/kente_pattern.dart';
 import '../../../models/device.dart';
 import '../../../models/enums.dart';
 import '../../../models/transfer.dart';
 import '../../../providers/user_provider.dart';
+import '../../transfer/providers/receive_info_provider.dart';
 import '../../transfer/providers/transfer_provider.dart';
 import '../providers/discovery_provider.dart';
 import '../widgets/device_detail_sheet.dart';
@@ -29,6 +35,9 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   Timer? _noneTimer;
   bool _waitedLongEnough = false;
+
+  late final bool _isDesktop =
+      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
   @override
   void initState() {
@@ -59,12 +68,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final profile = ref.watch(userProfileProvider);
-    final scanning = ref.watch(isScanningProvider);
-    final devicesAsync = ref.watch(discoveredDevicesProvider);
-    final devices = devicesAsync.valueOrNull ?? const <Device>[];
-
-    // An incoming transfer just started — jump to the transfer screen to show it.
+    // An incoming transfer just started — jump to the transfer screen to show
+    // it. Wired on every platform so a PC that's passively listening still
+    // surfaces the transfer.
     ref.listen<Transfer?>(activeTransferProvider, (prev, next) {
       if (next != null &&
           next.direction == TransferDirection.received &&
@@ -72,6 +78,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         context.push(RoutePaths.transfer);
       }
     });
+
+    return _isDesktop ? _buildDesktop(context) : _buildMobile(context);
+  }
+
+  /// Mobile home: the radar people scan with, plus Send / Receive actions.
+  Widget _buildMobile(BuildContext context) {
+    final profile = ref.watch(userProfileProvider);
+    final scanning = ref.watch(isScanningProvider);
+    final devicesAsync = ref.watch(discoveredDevicesProvider);
+    final devices = devicesAsync.valueOrNull ?? const <Device>[];
 
     return Scaffold(
       appBar: AppBar(
@@ -159,6 +175,219 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
         ],
       ),
+    );
+  }
+
+  /// Desktop home: the PC is a passive receiver. It opens straight to its own
+  /// connect-code QR (server + beacon already running), so a phone scans and
+  /// sends with zero setup on the PC. A "Send from this PC" list handles the
+  /// reverse direction for any phone the beacon has found.
+  Widget _buildDesktop(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.menu_rounded),
+          onPressed: () => context.push(RoutePaths.settings),
+        ),
+        title: GradientText(
+          AppConstants.appName,
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
+      ),
+      body: Stack(
+        children: [
+          const Positioned.fill(
+            child: IgnorePointer(
+              child: KentePattern(opacity: 0.09, cell: 64),
+            ),
+          ),
+          const SafeArea(child: _DesktopHomeBody()),
+        ],
+      ),
+    );
+  }
+}
+
+/// The desktop home content: connect-code QR up top, "send from this PC" below.
+class _DesktopHomeBody extends ConsumerWidget {
+  const _DesktopHomeBody();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = Theme.of(context).extension<KarlshareColors>()!;
+    final codeAsync = ref.watch(desktopConnectCodeProvider);
+    // Watching the device list keeps the LAN beacon alive (so this PC is also
+    // discoverable on a phone's radar) and powers the send-from-PC list.
+    final devices =
+        ref.watch(discoveredDevicesProvider).valueOrNull ?? const <Device>[];
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(AppConstants.space24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: AppConstants.space8),
+          Text(
+            'Ready to receive',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: AppConstants.space4),
+          Text(
+            'On your phone: open Karlshare, tap Send, choose files, then scan '
+            'this code.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: colors.textSecondary),
+          ),
+          const SizedBox(height: AppConstants.space24),
+          codeAsync.when(
+            loading: () => const SizedBox(
+              height: 240,
+              child: Center(child: CircularProgressIndicator()),
+            ),
+            error: (e, _) => _DesktopNotice(
+              icon: Icons.error_outline_rounded,
+              message: "Couldn't prepare this PC to receive.\n$e",
+              isError: true,
+              colors: colors,
+            ),
+            data: (code) {
+              if (code == null || !code.hasAddress) {
+                return _DesktopNotice(
+                  icon: Icons.wifi_off_rounded,
+                  message: "Connect this PC to Wi-Fi (or a phone's hotspot) so "
+                      "a phone can reach it, then reopen this screen.",
+                  isError: false,
+                  colors: colors,
+                );
+              }
+              return Column(
+                children: [
+                  Center(child: KarlshareQr(data: code.encode())),
+                  const SizedBox(height: AppConstants.space16),
+                  Text(
+                    code.name ?? 'This PC',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: AppConstants.space4),
+                  Text(
+                    '${code.hostIp}:${code.port}',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(color: colors.textSecondary),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: AppConstants.space32),
+          Divider(color: colors.border),
+          const SizedBox(height: AppConstants.space16),
+          _SendFromPc(
+            devices: devices,
+            colors: colors,
+            onSend: (device) {
+              ref.read(selectedDeviceProvider.notifier).state = device;
+              context.push(RoutePaths.filePicker);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A centered icon + message block for the desktop "no network / error" states.
+class _DesktopNotice extends StatelessWidget {
+  const _DesktopNotice({
+    required this.icon,
+    required this.message,
+    required this.isError,
+    required this.colors,
+  });
+
+  final IconData icon;
+  final String message;
+  final bool isError;
+  final KarlshareColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 240,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon,
+                size: 48,
+                color: isError ? colors.accent : colors.textTertiary),
+            const SizedBox(height: AppConstants.space12),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(color: colors.textSecondary),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Lists phones the beacon has found so the PC can push files to them. Tapping
+/// one selects it and opens the file picker.
+class _SendFromPc extends StatelessWidget {
+  const _SendFromPc({
+    required this.devices,
+    required this.colors,
+    required this.onSend,
+  });
+
+  final List<Device> devices;
+  final KarlshareColors colors;
+  final void Function(Device) onSend;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Send from this PC',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: AppConstants.space8),
+        if (devices.isEmpty)
+          Text(
+            'Phones on the same Wi-Fi appear here. You can also just share the '
+            'code above to receive files.',
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: colors.textSecondary),
+          )
+        else
+          ...devices.map(
+            (d) => Card(
+              margin: const EdgeInsets.only(bottom: AppConstants.space8),
+              child: ListTile(
+                leading: const Icon(Icons.smartphone_rounded),
+                title: Text(d.name),
+                subtitle: Text(d.ipAddress ?? d.address ?? ''),
+                trailing: const Icon(Icons.arrow_forward_rounded),
+                onTap: () => onSend(d),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

@@ -8,6 +8,9 @@
 // uses: basic_utils cert generation, dart:io TLS (mutual auth + accept-any +
 // fingerprint binding), the Wire framing, chunked transfer and checksum.
 
+// ignore_for_file: avoid_print
+//   This is a dev-only CLI runner; print() is the whole point of its output.
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

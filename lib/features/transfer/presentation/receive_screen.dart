@@ -1,18 +1,18 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/route_paths.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/theme/app_gradients.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/karlshare_qr.dart';
 import '../../../models/enums.dart';
 import '../../../models/transfer.dart';
+import '../../../providers/user_provider.dart';
+import '../../../services/connect_code.dart';
 import '../../../services/desktop/desktop_net.dart';
 import '../../../services/hotspot_service.dart';
 import '../providers/transfer_provider.dart';
@@ -36,6 +36,7 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
   String? _ssid;
   String? _password;
   String? _hostIp;
+  String? _selfName;
   bool _error = false;
 
   @override
@@ -45,6 +46,7 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
   }
 
   Future<void> _begin() async {
+    _selfName = ref.read(userProfileProvider)?.displayName;
     await startReceiving(ref); // open the listening server on every platform
     final hotspot = ref.read(hotspotServiceProvider);
 
@@ -98,16 +100,16 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
 
   String? get _qrData {
     if (_ssid != null && _password != null) {
-      return jsonEncode({
-        'k': 'karlshare',
-        's': _ssid,
-        'p': _password,
-        'h': _hostIp,
-        'port': _port,
-      });
+      return ConnectCode(
+        hostIp: _hostIp,
+        port: _port,
+        name: _selfName,
+        ssid: _ssid,
+        password: _password,
+      ).encode();
     }
     if (_hostIp != null) {
-      return jsonEncode({'k': 'karlshare', 'h': _hostIp, 'port': _port});
+      return ConnectCode(hostIp: _hostIp, port: _port, name: _selfName).encode();
     }
     return null;
   }
@@ -146,7 +148,7 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
             children: [
               const Spacer(),
               if (qr != null)
-                _QrCard(data: qr, colors: colors)
+                KarlshareQr(data: qr)
               else
                 SizedBox(
                   height: 240,
@@ -184,39 +186,3 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
   }
 }
 
-class _QrCard extends StatelessWidget {
-  const _QrCard({required this.data, required this.colors});
-
-  final String data;
-  final KarlshareColors colors;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        gradient: AppGradients.signature,
-        borderRadius: BorderRadius.circular(AppConstants.radiusLarge),
-      ),
-      child: Container(
-        padding: const EdgeInsets.all(AppConstants.space16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(AppConstants.radiusLarge - 4),
-        ),
-        child: QrImageView(
-          data: data,
-          size: 232,
-          eyeStyle: const QrEyeStyle(
-            eyeShape: QrEyeShape.square,
-            color: AppColors.electricPurple,
-          ),
-          dataModuleStyle: const QrDataModuleStyle(
-            dataModuleShape: QrDataModuleShape.square,
-            color: Color(0xFF15131F),
-          ),
-        ),
-      ),
-    );
-  }
-}
