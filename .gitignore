@@ -12,6 +12,10 @@
 .swiftpm/
 migrate_working_dir/
 
+# Release-staging directory (renamed copies of build/ output for GitHub
+# releases — never committed).
+/dist/
+
 # IntelliJ related
 *.iml
 *.ipr
