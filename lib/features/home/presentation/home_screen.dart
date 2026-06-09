@@ -193,6 +193,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           AppConstants.appName,
           style: Theme.of(context).textTheme.headlineSmall,
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Refresh network address',
+            // Re-reads this PC's IP — use it after joining Wi-Fi or switching
+            // networks, since the address is otherwise read once at launch.
+            onPressed: () => ref.invalidate(desktopConnectCodeProvider),
+          ),
+        ],
       ),
       body: Stack(
         children: [
@@ -253,15 +262,17 @@ class _DesktopHomeBody extends ConsumerWidget {
               message: "Couldn't prepare this PC to receive.\n$e",
               isError: true,
               colors: colors,
+              onRetry: () => ref.invalidate(desktopConnectCodeProvider),
             ),
             data: (code) {
               if (code == null || !code.hasAddress) {
                 return _DesktopNotice(
                   icon: Icons.wifi_off_rounded,
                   message: "Connect this PC to Wi-Fi (or a phone's hotspot) so "
-                      "a phone can reach it, then reopen this screen.",
+                      "a phone can reach it, then tap Try again.",
                   isError: false,
                   colors: colors,
+                  onRetry: () => ref.invalidate(desktopConnectCodeProvider),
                 );
               }
               return Column(
@@ -308,12 +319,14 @@ class _DesktopNotice extends StatelessWidget {
     required this.message,
     required this.isError,
     required this.colors,
+    this.onRetry,
   });
 
   final IconData icon;
   final String message;
   final bool isError;
   final KarlshareColors colors;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -335,6 +348,14 @@ class _DesktopNotice extends StatelessWidget {
                   .bodyMedium
                   ?.copyWith(color: colors.textSecondary),
             ),
+            if (onRetry != null) ...[
+              const SizedBox(height: AppConstants.space12),
+              TextButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Try again'),
+              ),
+            ],
           ],
         ),
       ),
