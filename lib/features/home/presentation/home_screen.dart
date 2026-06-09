@@ -70,11 +70,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     // An incoming transfer just started — jump to the transfer screen to show
     // it. Wired on every platform so a PC that's passively listening still
-    // surfaces the transfer.
+    // surfaces the transfer. Keyed on a change of transfer id (not prev == null)
+    // so a transfer that arrives right after a previous one finishes still
+    // navigates, even while the old, completed transfer is still in state and
+    // the success screen is on top.
     ref.listen<Transfer?>(activeTransferProvider, (prev, next) {
       if (next != null &&
           next.direction == TransferDirection.received &&
-          prev == null) {
+          next.status == TransferStatus.transferring &&
+          prev?.id != next.id) {
         context.push(RoutePaths.transfer);
       }
     });

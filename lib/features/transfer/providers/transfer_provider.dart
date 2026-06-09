@@ -91,31 +91,32 @@ class ActiveTransferNotifier extends StateNotifier<Transfer?> {
   }
 
   void _onEvent(TransferEvent event) {
+    final current = state;
+
+    // The first frame of any transfer is its header. If a header arrives for a
+    // different transfer than the one we're tracking, and the tracked one has
+    // already finished (or we aren't tracking any), it's a brand-new incoming
+    // transfer — adopt it. Without this, a transfer that arrives right after
+    // one completes is dropped by the stale-id guard below (or merged into the
+    // finished transfer), so the receiver never sees it.
+    if (event.type == TransferEventType.header &&
+        event.transferId != _activeTransferId &&
+        _isFinished(current)) {
+      _beginIncoming(event);
+      return;
+    }
+
+    // Ignore events that belong to a different transfer than the active one.
     if (_activeTransferId != null && event.transferId != _activeTransferId) {
       return;
     }
-    final current = state;
     switch (event.type) {
       case TransferEventType.started:
         break;
       case TransferEventType.header:
-        // Receiver-side: a new file is incoming we hadn't pre-registered.
-        if (current == null) {
-          _activeTransferId = event.transferId;
-          _startedAt ??= DateTime.now();
-          state = Transfer(
-            id: event.transferId,
-            device: Device(
-              id: 'incoming',
-              name: event.fileName ?? 'Incoming',
-              status: DeviceStatus.connecting,
-            ),
-            direction: TransferDirection.received,
-            files: [_fileFrom(event)],
-            timestamp: DateTime.now(),
-            status: TransferStatus.transferring,
-          );
-        } else if (!current.files.any((f) => f.id == (event.fileId ?? ''))) {
+        // Additional file within the transfer we're already tracking.
+        if (current != null &&
+            !current.files.any((f) => f.id == (event.fileId ?? ''))) {
           state = current.copyWith(
             files: [...current.files, _fileFrom(event)],
           );
@@ -189,6 +190,37 @@ class ActiveTransferNotifier extends StateNotifier<Transfer?> {
         progress: 0,
         path: event.savePath,
       );
+
+  /// A transfer is "finished" (free to be replaced by a new incoming one) when
+  /// there is none, or it has completed or failed.
+  bool _isFinished(Transfer? t) =>
+      t == null ||
+      t.status == TransferStatus.completed ||
+      t.status == TransferStatus.failed;
+
+  /// Starts tracking a fresh incoming (received) transfer from its header,
+  /// resetting the per-transfer counters so stats don't carry over from a
+  /// previous one.
+  void _beginIncoming(TransferEvent event) {
+    _activeTransferId = event.transferId;
+    _startedAt = DateTime.now();
+    _lastSpeedSample = DateTime.now();
+    _lastTotalBytes = 0;
+    _speedBytesPerSec = 0;
+    lastError = null;
+    state = Transfer(
+      id: event.transferId,
+      device: Device(
+        id: 'incoming',
+        name: event.fileName ?? 'Incoming',
+        status: DeviceStatus.connecting,
+      ),
+      direction: TransferDirection.received,
+      files: [_fileFrom(event)],
+      timestamp: DateTime.now(),
+      status: TransferStatus.transferring,
+    );
+  }
 
   void _refreshSpeed(int totalBytes) {
     final now = DateTime.now();
