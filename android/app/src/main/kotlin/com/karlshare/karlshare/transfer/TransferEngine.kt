@@ -376,9 +376,10 @@ class TransferEngine(
             when (frame) {
                 is KarlshareProtocol.Frame.Header -> {
                     val h = frame.header
-                    val target = File(saveDir, uniqueName(h.name))
-                    val raf = RandomAccessFile(target, "rw").apply { setLength(h.size) }
-                    val recv = ReceivingFile(h, target, raf)
+                    val saved = withContext(Dispatchers.IO) {
+                        ReceivedFileStore.create(context, h.name, h.mime, h.size)
+                    }
+                    val recv = ReceivingFile(h, saved, MessageDigest.getInstance("SHA-256"))
                     openFiles[h.fileId] = recv
                     active.totalBytes.addAndGet(h.size)
                     emit("header", mapOf(
@@ -387,7 +388,7 @@ class TransferEngine(
                         "name" to h.name,
                         "size" to h.size,
                         "mime" to h.mime,
-                        "savePath" to target.absolutePath,
+                        "savePath" to saved.location,
                     ))
                     // Zero-byte files carry no chunks — finalise right away so
                     // the UI still receives a fileComplete event.
@@ -399,14 +400,13 @@ class TransferEngine(
                 is KarlshareProtocol.Frame.ChunkFrame -> {
                     val chunk = frame.chunk
                     val recv = openFiles[chunk.fileId] ?: continue
-                    // Chunks arrive in order on a single stream, so the running
-                    // received-byte count is the write offset. This stays correct
-                    // even if the chunk size is ever auto-tuned — we no longer
-                    // assume a fixed DEFAULT_CHUNK_SIZE per index.
+                    // Chunks arrive in order on a single stream, so we append
+                    // sequentially and fold each chunk into a running SHA-256 —
+                    // no read-back is needed to verify the file at the end.
                     withContext(Dispatchers.IO) {
-                        recv.raf.seek(recv.received)
-                        recv.raf.write(chunk.data)
+                        recv.saved.output.write(chunk.data)
                     }
+                    recv.digest.update(chunk.data)
                     recv.received += chunk.data.size
                     active.transferredBytes.addAndGet(chunk.data.size.toLong())
                     emitProgress(active, recv.header.fileId, recv.received, recv.header.size)
@@ -423,17 +423,21 @@ class TransferEngine(
                 }
             }
         }
-        openFiles.values.forEach { runCatching { it.raf.close() } }
+        openFiles.values.forEach { runCatching { it.saved.discard() } }
     }
 
-    /** Closes the file, verifies its SHA-256 and emits the terminal event. */
+    /** Finalises the file: verifies its SHA-256, publishes or deletes it, and
+     *  emits the terminal event with the user-visible save location. */
     private suspend fun finishFile(recv: ReceivingFile, active: ActiveTransfer) {
-        withContext(Dispatchers.IO) { runCatching { recv.raf.close() } }
-        if (verifyChecksum(recv.target, recv.header.checksum)) {
+        val ok = recv.digest.digest().contentEquals(recv.header.checksum)
+        withContext(Dispatchers.IO) {
+            if (ok) recv.saved.commit() else recv.saved.discard()
+        }
+        if (ok) {
             emit("fileComplete", mapOf(
                 "transferId" to active.id.toString(),
                 "fileId" to recv.header.fileId.toString(),
-                "savePath" to recv.target.absolutePath,
+                "savePath" to recv.saved.location,
             ))
         } else {
             emit("error", mapOf(
@@ -567,19 +571,6 @@ class TransferEngine(
                 KarlshareProtocol.Capabilities.SUPPORTS_TLS,
         )
 
-    private fun uniqueName(base: String): String {
-        val target = File(saveDir, base)
-        if (!target.exists()) return base
-        val stem = base.substringBeforeLast('.', base)
-        val ext = base.substringAfterLast('.', "")
-        var i = 1
-        while (true) {
-            val candidate = if (ext.isEmpty()) "$stem ($i)" else "$stem ($i).$ext"
-            if (!File(saveDir, candidate).exists()) return candidate
-            i++
-        }
-    }
-
     private suspend fun sha256(file: File): ByteArray = withContext(Dispatchers.IO) {
         val md = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { stream ->
@@ -592,9 +583,6 @@ class TransferEngine(
         }
         md.digest()
     }
-
-    private suspend fun verifyChecksum(file: File, expected: ByteArray): Boolean =
-        sha256(file).contentEquals(expected)
 
     private fun emitProgress(active: ActiveTransfer, fileId: UUID, fileSent: Long, fileSize: Long) {
         emit("progress", mapOf(
@@ -624,10 +612,10 @@ class TransferEngine(
         val size: Long,
     )
 
-    private data class ReceivingFile(
+    private class ReceivingFile(
         val header: KarlshareProtocol.FileHeader,
-        val target: File,
-        val raf: RandomAccessFile,
+        val saved: SavedFile,
+        val digest: MessageDigest,
         var received: Long = 0,
     )
 }
