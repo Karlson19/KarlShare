@@ -59,6 +59,7 @@ class TransferEvent {
     this.message,
     this.attempt = 0,
     this.backoffMs = 0,
+    this.peerIp,
   });
 
   final TransferEventType type;
@@ -69,6 +70,10 @@ class TransferEvent {
   final int fileSize;
   final String? savePath;
   final int fileCount;
+
+  /// The remote device's IP on an incoming (received) transfer, so the
+  /// receiver can later send files back to it. Null for outgoing transfers.
+  final String? peerIp;
 
   /// Per-file progress (header → fileComplete).
   final int fileBytes;
@@ -206,6 +211,7 @@ class TransferService {
       message: raw['message'] as String?,
       attempt: (raw['attempt'] as num?)?.toInt() ?? 0,
       backoffMs: (raw['backoffMs'] as num?)?.toInt() ?? 0,
+      peerIp: raw['peerIp'] as String?,
     );
   }
 }

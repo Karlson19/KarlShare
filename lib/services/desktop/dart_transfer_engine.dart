@@ -40,6 +40,7 @@ class DartTransferEngine {
     int grandTotal = 0,
     String? direction,
     String? message,
+    String? peerIp,
   }) {
     _controller.add(TransferEvent(
       type: type,
@@ -56,6 +57,7 @@ class DartTransferEngine {
       grandTotal: grandTotal,
       direction: direction,
       message: message,
+      peerIp: peerIp,
     ));
   }
 
@@ -91,6 +93,12 @@ class DartTransferEngine {
     final open = <String, _RecvFile>{};
     var grand = 0;
     var recvTotal = 0;
+    String? peerIp;
+    try {
+      peerIp = socket.remoteAddress.address;
+    } catch (_) {
+      // Socket may already be torn down; peerIp stays null (no send-back).
+    }
     try {
       socket.setOption(SocketOption.tcpNoDelay, true);
       final remote = await Wire.readHandshake(reader.read);
@@ -119,6 +127,7 @@ class DartTransferEngine {
               fileMime: h.mime,
               savePath: target.path,
               direction: 'received',
+              peerIp: peerIp,
             );
             if (h.size == 0) {
               await raf.close();

@@ -12,8 +12,10 @@ import '../../../core/theme/app_gradients.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/format_utils.dart';
 import '../../../core/widgets/karlshare_button.dart';
+import '../../../models/device.dart';
 import '../../../models/enums.dart';
 import '../../../models/transfer_file.dart';
+import '../../home/providers/discovery_provider.dart';
 import '../../transfer/providers/transfer_provider.dart';
 import '../providers/documents_provider.dart';
 import '../providers/file_selection_provider.dart';
@@ -76,13 +78,68 @@ class _FilePickerScreenState extends ConsumerState<FilePickerScreen>
       return;
     }
     if (_isDesktop) {
-      // No camera on desktop — recipient is chosen from the radar.
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Tap a device on the radar to choose who to send to.'),
-      ));
+      // No camera on desktop — pick the recipient from the devices we've seen.
+      _chooseDesktopRecipient();
       return;
     }
     context.push(RoutePaths.sendConnect); // phone: scan the receiver's QR
+  }
+
+  /// Desktop recipient picker: the phone we last received from (top, so
+  /// "send back" is one tap) plus any phones currently on the network.
+  void _chooseDesktopRecipient() {
+    final discovered =
+        ref.read(discoveredDevicesProvider).valueOrNull ?? const <Device>[];
+    final last = ref.read(lastReceivedDeviceProvider);
+    final seen = <String>{};
+    final devices = <Device>[];
+    for (final d in [?last, ...discovered]) {
+      final key = d.ipAddress ?? d.address ?? d.id;
+      if (key.isEmpty || !seen.add(key)) continue;
+      devices.add(d);
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(AppConstants.space16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(AppConstants.space8),
+                child: Text('Send to',
+                    style: Theme.of(context).textTheme.titleMedium),
+              ),
+              if (devices.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(AppConstants.space8),
+                  child: Text(
+                    'No phones found yet. On the phone, open Karlshare and keep '
+                    'it on the main screen, and make sure both devices are on '
+                    'the same Wi-Fi or hotspot.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                )
+              else
+                ...devices.map(
+                  (d) => ListTile(
+                    leading: const Icon(Icons.smartphone_rounded),
+                    title: Text(d.name),
+                    subtitle: Text(d.ipAddress ?? d.address ?? ''),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      ref.read(selectedDeviceProvider.notifier).state = d;
+                      context.push(RoutePaths.transfer);
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -95,7 +152,10 @@ class _FilePickerScreenState extends ConsumerState<FilePickerScreen>
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: context.pop,
+          // Reached via go() in some flows (e.g. Send More), which leaves
+          // nothing to pop — fall back to home so back always works.
+          onPressed: () =>
+              context.canPop() ? context.pop() : context.go(RoutePaths.home),
         ),
         title: const Text('Select Files'),
         bottom: TabBar(

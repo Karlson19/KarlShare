@@ -221,6 +221,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
+/// Merges the last-received device (first, so "send back" is the obvious pick)
+/// with live-discovered devices, de-duplicated by IP.
+List<Device> _mergeDevices(Device? last, List<Device> discovered) {
+  final seen = <String>{};
+  final out = <Device>[];
+  for (final d in [?last, ...discovered]) {
+    final key = d.ipAddress ?? d.address ?? d.id;
+    if (key.isEmpty || !seen.add(key)) continue;
+    out.add(d);
+  }
+  return out;
+}
+
 /// The desktop home content: connect-code QR up top, "send from this PC" below.
 class _DesktopHomeBody extends ConsumerWidget {
   const _DesktopHomeBody();
@@ -230,9 +243,13 @@ class _DesktopHomeBody extends ConsumerWidget {
     final colors = Theme.of(context).extension<KarlshareColors>()!;
     final codeAsync = ref.watch(desktopConnectCodeProvider);
     // Watching the device list keeps the LAN beacon alive (so this PC is also
-    // discoverable on a phone's radar) and powers the send-from-PC list.
-    final devices =
+    // discoverable on a phone's radar) and powers the send-from-PC list. The
+    // phone we last received from is included so the user can send back even
+    // if live discovery hasn't picked it up.
+    final discovered =
         ref.watch(discoveredDevicesProvider).valueOrNull ?? const <Device>[];
+    final last = ref.watch(lastReceivedDeviceProvider);
+    final devices = _mergeDevices(last, discovered);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppConstants.space24),
@@ -254,6 +271,16 @@ class _DesktopHomeBody extends ConsumerWidget {
                 .textTheme
                 .bodyMedium
                 ?.copyWith(color: colors.textSecondary),
+          ),
+          const SizedBox(height: AppConstants.space8),
+          Text(
+            "No Wi-Fi? Turn on your phone's hotspot, connect this PC to it, "
+            'then tap refresh.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: colors.textTertiary),
           ),
           const SizedBox(height: AppConstants.space24),
           codeAsync.when(

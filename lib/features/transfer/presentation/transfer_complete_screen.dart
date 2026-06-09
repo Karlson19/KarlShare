@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -10,6 +12,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/format_utils.dart';
 import '../../../core/widgets/karlshare_button.dart';
 import '../../../core/widgets/sankofa_mark.dart';
+import '../../../models/device.dart';
 import '../../../models/enums.dart';
 import '../../../models/transfer.dart';
 import '../providers/transfer_provider.dart';
@@ -43,6 +46,121 @@ class _TransferCompleteScreenState
     ref.read(selectedDeviceProvider.notifier).state = null;
   }
 
+  /// The folder a received transfer was saved into, derived from the first
+  /// file's saved path (handles both / and \ separators).
+  String? _savedDir(Transfer? transfer) {
+    if (transfer == null) return null;
+    for (final f in transfer.files) {
+      final p = f.path;
+      if (p != null && p.isNotEmpty) {
+        final i = p.lastIndexOf(RegExp(r'[\\/]'));
+        if (i > 0) return p.substring(0, i);
+      }
+    }
+    return null;
+  }
+
+  void _openFolder(String dir) {
+    try {
+      if (Platform.isWindows) {
+        Process.run('explorer', [dir]);
+      } else if (Platform.isMacOS) {
+        Process.run('open', [dir]);
+      } else if (Platform.isLinux) {
+        Process.run('xdg-open', [dir]);
+      }
+    } catch (_) {
+      // Best effort; the path is shown on screen as a fallback.
+    }
+  }
+
+  /// Send files back to whoever we just received from, keeping that device
+  /// selected so the file picker goes straight to the transfer.
+  void _sendBack(Device device) {
+    ref.read(activeTransferProvider.notifier).cancel();
+    ref.read(selectedFilesProvider.notifier).state = [];
+    ref.read(selectedDeviceProvider.notifier).state = device;
+    context.go(RoutePaths.filePicker);
+  }
+
+  Widget _actions({
+    required Transfer? transfer,
+    required bool isReceived,
+    required String? savedDir,
+  }) {
+    final isDesktop =
+        !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+    final back = transfer?.device;
+    final backIp = back?.ipAddress;
+    final canSendBack = backIp != null && backIp.isNotEmpty;
+
+    // Sent transfer: offer another send or go home.
+    if (!isReceived) {
+      return Row(
+        children: [
+          Expanded(
+            child: KarlshareButton(
+              label: 'Send More',
+              variant: KarlshareButtonVariant.secondary,
+              onPressed: () {
+                _reset();
+                context.go(RoutePaths.filePicker);
+              },
+            ),
+          ),
+          const SizedBox(width: AppConstants.space16),
+          Expanded(
+            child: KarlshareButton(
+              label: 'Done',
+              onPressed: () {
+                _reset();
+                context.go(RoutePaths.home);
+              },
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Received transfer: open the folder (desktop) and optionally send back.
+    return Column(
+      children: [
+        Row(
+          children: [
+            if (isDesktop && savedDir != null) ...[
+              Expanded(
+                child: KarlshareButton(
+                  label: 'Open folder',
+                  icon: Icons.folder_open_rounded,
+                  variant: KarlshareButtonVariant.secondary,
+                  onPressed: () => _openFolder(savedDir),
+                ),
+              ),
+              const SizedBox(width: AppConstants.space16),
+            ],
+            Expanded(
+              child: KarlshareButton(
+                label: 'Done',
+                onPressed: () {
+                  _reset();
+                  context.go(RoutePaths.home);
+                },
+              ),
+            ),
+          ],
+        ),
+        if (canSendBack) ...[
+          const SizedBox(height: AppConstants.space8),
+          TextButton.icon(
+            onPressed: () => _sendBack(back!),
+            icon: const Icon(Icons.reply_rounded),
+            label: const Text('Send a file back'),
+          ),
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final transfer = _snapshot;
@@ -53,6 +171,8 @@ class _TransferCompleteScreenState
         ? "All done."
         : '$fileCount ${fileCount == 1 ? "file" : "files"} $action in ${FormatUtils.eta(_elapsedSeconds)}';
     final total = transfer?.totalBytes ?? 0;
+    final isReceived = direction == TransferDirection.received;
+    final savedDir = _savedDir(transfer);
 
     return Scaffold(
       body: SafeArea(
@@ -98,30 +218,19 @@ class _TransferCompleteScreenState
                       style: Theme.of(context).textTheme.bodyMedium,
                     ).animate(delay: 450.ms).fadeIn(),
                   ],
+                  if (isReceived && savedDir != null) ...[
+                    const SizedBox(height: AppConstants.space8),
+                    Text(
+                      'Saved to $savedDir',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ).animate(delay: 500.ms).fadeIn(),
+                  ],
                   const Spacer(),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: KarlshareButton(
-                          label: 'Send More',
-                          variant: KarlshareButtonVariant.secondary,
-                          onPressed: () {
-                            _reset();
-                            context.go(RoutePaths.filePicker);
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: AppConstants.space16),
-                      Expanded(
-                        child: KarlshareButton(
-                          label: 'Done',
-                          onPressed: () {
-                            _reset();
-                            context.go(RoutePaths.home);
-                          },
-                        ),
-                      ),
-                    ],
+                  _actions(
+                    transfer: transfer,
+                    isReceived: isReceived,
+                    savedDir: savedDir,
                   ),
                 ],
               ),

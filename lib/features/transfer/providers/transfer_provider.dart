@@ -19,6 +19,11 @@ final selectedFilesProvider = StateProvider<List<TransferFile>>((ref) => []);
 /// Device chosen from the radar / device sheet.
 final selectedDeviceProvider = StateProvider<Device?>((ref) => null);
 
+/// The device we most recently received a transfer from. Lets a receiver (the
+/// PC in particular, which has no camera to scan a QR) send files back to it
+/// with one tap, without waiting for the radar to rediscover it.
+final lastReceivedDeviceProvider = StateProvider<Device?>((ref) => null);
+
 /// Drives an active transfer by forwarding native [TransferEvent]s into the
 /// app's [Transfer] domain model. On platforms where the native bridge isn't
 /// available (no Android), [start] reports failure and the UI shows a graceful
@@ -208,13 +213,22 @@ class ActiveTransferNotifier extends StateNotifier<Transfer?> {
     _lastTotalBytes = 0;
     _speedBytesPerSec = 0;
     lastError = null;
+    final peerIp = event.peerIp;
+    final device = Device(
+      id: peerIp ?? 'incoming',
+      name: peerIp ?? 'Incoming device',
+      status: DeviceStatus.connecting,
+      address: peerIp,
+      ipAddress: peerIp,
+    );
+    // Remember the sender so the user can send files straight back to it.
+    if (peerIp != null && peerIp.isNotEmpty) {
+      _ref.read(lastReceivedDeviceProvider.notifier).state =
+          device.copyWith(status: DeviceStatus.ready);
+    }
     state = Transfer(
       id: event.transferId,
-      device: Device(
-        id: 'incoming',
-        name: event.fileName ?? 'Incoming',
-        status: DeviceStatus.connecting,
-      ),
+      device: device,
       direction: TransferDirection.received,
       files: [_fileFrom(event)],
       timestamp: DateTime.now(),
