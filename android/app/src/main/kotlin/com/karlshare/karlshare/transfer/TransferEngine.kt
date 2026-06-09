@@ -275,8 +275,14 @@ class TransferEngine(
         remoteDeviceId: UUID,
         claimedFingerprint: ByteArray,
     ) {
-        val peerCert = ssl.session.peerCertificates.firstOrNull() as? X509Certificate
-            ?: throw SecurityException("peer presented no certificate")
+        // With one-way TLS the receiver has no client cert to bind, so this
+        // skips on the receiver side. The sender always sees the server's cert,
+        // so its verification still runs. Mirrors the desktop engine, where the
+        // receiver likewise can't bind a peer it never asked to authenticate.
+        // (session.peerCertificates throws when no peer cert was presented.)
+        val peerCert = runCatching { ssl.session.peerCertificates.firstOrNull() }
+            .getOrNull() as? X509Certificate
+            ?: return
         val actualFingerprint = KarlshareKeystore.fingerprintFor(peerCert)
         if (!actualFingerprint.contentEquals(claimedFingerprint)) {
             throw SecurityException(
@@ -305,7 +311,13 @@ class TransferEngine(
                         reuseAddress = true
                         bind(InetSocketAddress(KarlshareProtocol.TRANSFER_PORT))
                         enabledProtocols = TLS_PROTOCOLS
-                        needClientAuth = true
+                        // One-way TLS, matching the desktop engine. Requiring a
+                        // client cert (mutual auth) breaks the cross-stack
+                        // handshake with the PC (Conscrypt server vs BoringSSL
+                        // client) and kills PC -> phone transfers. The sender
+                        // still verifies the receiver's fingerprint, which is
+                        // the binding that actually matters.
+                        needClientAuth = false
                     }
                 serverSocket = ssl
                 Log.i(TAG, "TLS server up on :${KarlshareProtocol.TRANSFER_PORT}")
