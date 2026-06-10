@@ -17,6 +17,7 @@ class HotspotEvent {
     this.gatewayIp,
     this.hostIp,
     this.message,
+    this.reason,
   });
 
   final HotspotEventType type;
@@ -28,6 +29,10 @@ class HotspotEvent {
   /// straight to it, no gateway guessing).
   final String? hostIp;
   final String? message;
+
+  /// Machine-readable error cause (e.g. 'location' when Location services are
+  /// off) so the UI can offer the right fix button, not just a message.
+  final String? reason;
 }
 
 /// Wraps the `karlshare/hotspot` channel: the receiver creates a Wi-Fi hotspot,
@@ -71,6 +76,19 @@ class HotspotService {
     await _method.invokeMethod<void>('leaveHotspot');
   }
 
+  /// Whether Android's Location services toggle is on — LocalOnlyHotspot
+  /// refuses to start without it.
+  Future<bool> isLocationEnabled() async {
+    if (!isPlatformSupported) return true;
+    return (await _method.invokeMethod<bool>('isLocationEnabled')) ?? true;
+  }
+
+  /// Jumps straight to the system Location settings page.
+  Future<void> openLocationSettings() async {
+    if (!isPlatformSupported) return;
+    await _method.invokeMethod<void>('openLocationSettings');
+  }
+
   Stream<HotspotEvent> events() {
     if (!isPlatformSupported) return const Stream.empty();
     return _cached ??= _events
@@ -99,6 +117,7 @@ class HotspotService {
       gatewayIp: raw['gatewayIp'] as String?,
       hostIp: raw['hostIp'] as String?,
       message: raw['message'] as String?,
+      reason: raw['reason'] as String?,
     );
   }
 }

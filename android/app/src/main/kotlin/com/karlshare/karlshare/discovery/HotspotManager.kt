@@ -1,6 +1,8 @@
 package com.karlshare.karlshare.discovery
 
 import android.content.Context
+import android.content.Intent
+import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
@@ -9,6 +11,7 @@ import android.net.NetworkRequest
 import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSpecifier
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
@@ -91,8 +94,32 @@ class HotspotManager(
                 }
             }
             "leaveHotspot" -> { leaveHotspot(); result.success(null) }
+            "isLocationEnabled" -> result.success(isLocationEnabled())
+            "openLocationSettings" -> {
+                runCatching {
+                    context.startActivity(
+                        Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+                result.success(null)
+            }
             else -> result.notImplemented()
         }
+    }
+
+    /** LocalOnlyHotspot silently refuses to start while Location is off, so we
+     *  preflight it and tell the user exactly what to flip. */
+    private fun isLocationEnabled(): Boolean = try {
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            lm.isLocationEnabled
+        } else {
+            lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        }
+    } catch (_: Throwable) {
+        true // can't tell — let startLocalOnlyHotspot report the real error
     }
 
     // ---- Host side ----------------------------------------------------------
@@ -104,6 +131,13 @@ class HotspotManager(
         }
         if (hotspotReservation != null) {
             emitReady(hotspotReservation!!)
+            return
+        }
+        if (!isLocationEnabled()) {
+            emit("hotspotError", mapOf(
+                "message" to "Turn on Location to start the hotspot — Android requires it.",
+                "reason" to "location",
+            ))
             return
         }
         emit("status", mapOf("message" to "Starting hotspot…"))

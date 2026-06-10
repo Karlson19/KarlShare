@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/route_paths.dart';
@@ -38,6 +39,7 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
   String? _hostIp;
   String? _selfName;
   bool _error = false;
+  String? _errorReason;
 
   @override
   void initState() {
@@ -66,8 +68,40 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
       return;
     }
 
-    _sub = hotspot.events().listen(_onEvent);
-    setState(() => _status = 'Starting hotspot…');
+    _sub ??= hotspot.events().listen(_onEvent);
+
+    // Android refuses to host a hotspot without Location: gate on the
+    // permission and the system toggle HERE, with fix-it buttons, instead of
+    // letting startLocalOnlyHotspot die with a cryptic failure.
+    final perm = await Permission.locationWhenInUse.request();
+    if (!mounted) return;
+    if (!perm.isGranted) {
+      setState(() {
+        _error = true;
+        _errorReason =
+            perm.isPermanentlyDenied ? 'permission-settings' : 'permission';
+        _status =
+            'Karlshare needs Location permission to create the hotspot — an Android rule for all apps.';
+      });
+      return;
+    }
+    if (!await hotspot.isLocationEnabled()) {
+      if (!mounted) return;
+      setState(() {
+        _error = true;
+        _errorReason = 'location';
+        _status =
+            'Turn on Location to start the hotspot — Android requires it.';
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _error = false;
+      _errorReason = null;
+      _status = 'Starting hotspot…';
+    });
     await hotspot.startHotspot();
   }
 
@@ -90,6 +124,7 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
         setState(() {
           _status = e.message ?? 'Hotspot failed to start.';
           _error = true;
+          _errorReason = e.reason;
         });
         break;
       case HotspotEventType.joined:
@@ -182,6 +217,34 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
                 const SizedBox(height: AppConstants.space8),
                 Text('Network: $_ssid',
                     style: Theme.of(context).textTheme.bodyMedium),
+              ],
+              if (_error) ...[
+                const SizedBox(height: AppConstants.space12),
+                Wrap(
+                  spacing: AppConstants.space12,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    if (_errorReason == 'location')
+                      FilledButton.icon(
+                        onPressed: () => ref
+                            .read(hotspotServiceProvider)
+                            .openLocationSettings(),
+                        icon: const Icon(Icons.location_on_rounded),
+                        label: const Text('Turn on Location'),
+                      ),
+                    if (_errorReason == 'permission-settings')
+                      FilledButton.icon(
+                        onPressed: openAppSettings,
+                        icon: const Icon(Icons.settings_rounded),
+                        label: const Text('Open app settings'),
+                      ),
+                    TextButton.icon(
+                      onPressed: _begin,
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('Try again'),
+                    ),
+                  ],
+                ),
               ],
               const Spacer(),
               Text(

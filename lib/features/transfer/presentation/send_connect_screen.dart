@@ -99,7 +99,8 @@ class _SendConnectScreenState extends ConsumerState<SendConnectScreen> {
         _error = false;
         _pendingHostIp = code.hasAddress ? code.hostIp : null;
         _pendingName = code.name;
-        _status = 'Joining ${code.ssid}…';
+        _status =
+            'Joining ${code.ssid}… When Android asks to connect, tap Connect.';
       });
       ref
           .read(hotspotServiceProvider)
