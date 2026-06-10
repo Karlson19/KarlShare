@@ -59,12 +59,6 @@ class DeviceDetailSheet extends ConsumerWidget {
                   context.push(RoutePaths.filePicker);
                 },
         ),
-        const SizedBox(height: AppConstants.space12),
-        KarlshareButton(
-          label: 'Request File',
-          variant: KarlshareButtonVariant.secondary,
-          onPressed: busy ? null : () => context.pop(),
-        ),
         if (recent.isNotEmpty) ...[
           const SizedBox(height: AppConstants.space24),
           Align(

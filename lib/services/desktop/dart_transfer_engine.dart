@@ -1,9 +1,10 @@
 import 'dart:async';
+import 'dart:convert' show ByteConversionSink;
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart' show sha256;
+import 'package:crypto/crypto.dart' show Digest, sha256;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -131,8 +132,8 @@ class DartTransferEngine {
             );
             if (h.size == 0) {
               await raf.close();
-              open.remove(fid);
-              await _finish(target, h, transferId, fid);
+              final rf = open.remove(fid)!;
+              await _finish(rf, transferId, fid);
             }
             break;
           case FrameType.chunk:
@@ -141,6 +142,7 @@ class DartTransferEngine {
             final rf = open[fid];
             if (rf == null) break;
             await rf.raf.writeFrom(c.data);
+            rf.updateDigest(c.data);
             rf.received += c.data.length;
             recvTotal += c.data.length;
             _emit(
@@ -155,7 +157,7 @@ class DartTransferEngine {
             if (rf.received >= rf.header.size) {
               await rf.raf.close();
               open.remove(fid);
-              await _finish(rf.target, rf.header, transferId, fid);
+              await _finish(rf, transferId, fid);
             }
             break;
           case FrameType.ack:
@@ -169,9 +171,14 @@ class DartTransferEngine {
     } catch (e) {
       _emit(type: TransferEventType.error, transferId: transferId, message: '$e');
     } finally {
+      // Anything still open here never completed — close and remove the
+      // partial file so cancels/disconnects don't litter half-written junk.
       for (final rf in open.values) {
         try {
           await rf.raf.close();
+        } catch (_) {}
+        try {
+          await rf.target.delete();
         } catch (_) {}
       }
       _cancelled.remove(transferId);
@@ -179,13 +186,19 @@ class DartTransferEngine {
     }
   }
 
-  Future<void> _finish(File target, FileHeaderMsg h, String transferId, String fid) async {
-    final ok = await _checksumMatches(target, h.checksum);
+  Future<void> _finish(_RecvFile rf, String transferId, String fid) async {
+    final ok = _bytesEqual(rf.finishDigest(), rf.header.checksum);
+    if (!ok) {
+      // Never leave a corrupt file where the user will find it.
+      try {
+        await rf.target.delete();
+      } catch (_) {}
+    }
     _emit(
       type: ok ? TransferEventType.fileComplete : TransferEventType.error,
       transferId: transferId,
       fileId: fid,
-      savePath: ok ? target.path : null,
+      savePath: ok ? rf.target.path : null,
       message: ok ? null : 'checksum mismatch',
     );
   }
@@ -366,14 +379,11 @@ class DartTransferEngine {
     return candidate;
   }
 
+  /// Streams the file through SHA-256 — constant memory regardless of size,
+  /// so hashing a movie doesn't load the whole thing into RAM first.
   Future<Uint8List> _sha256File(File file) async {
-    final bytes = await file.readAsBytes();
-    return Uint8List.fromList(sha256.convert(bytes).bytes);
-  }
-
-  Future<bool> _checksumMatches(File file, Uint8List expected) async {
-    final actual = await _sha256File(file);
-    return _bytesEqual(actual, expected);
+    final digest = await sha256.bind(file.openRead()).first;
+    return Uint8List.fromList(digest.bytes);
   }
 
   Uint8List _rand16() =>
@@ -406,4 +416,26 @@ class _RecvFile {
   final File target;
   final RandomAccessFile raf;
   int received = 0;
+
+  // SHA-256 folded in as chunks arrive, so verification at the end is free —
+  // no re-reading a (possibly huge) file from disk after the transfer.
+  final _digestOut = _DigestSink();
+  late final ByteConversionSink _digestIn =
+      sha256.startChunkedConversion(_digestOut);
+
+  void updateDigest(List<int> data) => _digestIn.add(data);
+
+  Uint8List finishDigest() {
+    _digestIn.close();
+    return Uint8List.fromList(_digestOut.value!.bytes);
+  }
+}
+
+/// Minimal sink to capture the single [Digest] the chunked conversion emits.
+class _DigestSink implements Sink<Digest> {
+  Digest? value;
+  @override
+  void add(Digest data) => value = data;
+  @override
+  void close() {}
 }
