@@ -115,7 +115,12 @@ class _SendConnectScreenState extends ConsumerState<SendConnectScreen> {
       address: ip,
       ipAddress: ip,
     );
-    if (mounted) context.pushReplacement(RoutePaths.transfer);
+    if (!mounted) return;
+    // Scanned after picking files -> send now. Scanned from home (no files
+    // yet) -> connected, go pick what to send to this device.
+    final hasFiles = ref.read(selectedFilesProvider).isNotEmpty;
+    context.pushReplacement(
+        hasFiles ? RoutePaths.transfer : RoutePaths.filePicker);
   }
 
   @override

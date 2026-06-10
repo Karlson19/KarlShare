@@ -99,6 +99,8 @@ class TransferEngine(
         val cancelFlag: AtomicBoolean = AtomicBoolean(false),
         val transferredBytes: AtomicLong = AtomicLong(0),
         val totalBytes: AtomicLong = AtomicLong(0),
+        /** Remote address on incoming connections, so the UI can send back. */
+        val peerIp: String? = null,
     )
 
     fun dispose() {
@@ -344,7 +346,10 @@ class TransferEngine(
 
     private suspend fun handleIncoming(client: SSLSocket) {
         val transferId = UUID.randomUUID()
-        val active = ActiveTransfer(transferId)
+        val active = ActiveTransfer(
+            transferId,
+            peerIp = runCatching { client.inetAddress?.hostAddress }.getOrNull(),
+        )
         activeTransfers[transferId] = active
         try {
             client.tcpNoDelay = true
@@ -394,14 +399,18 @@ class TransferEngine(
                     val recv = ReceivingFile(h, saved, MessageDigest.getInstance("SHA-256"))
                     openFiles[h.fileId] = recv
                     active.totalBytes.addAndGet(h.size)
-                    emit("header", mapOf(
+                    val headerEvent = mutableMapOf<String, Any>(
                         "transferId" to active.id.toString(),
                         "fileId" to h.fileId.toString(),
                         "name" to h.name,
                         "size" to h.size,
                         "mime" to h.mime,
                         "savePath" to saved.location,
-                    ))
+                    )
+                    // Tell the UI who's sending so it can offer "send back" —
+                    // the persistent two-way session phones expect.
+                    active.peerIp?.let { headerEvent["peerIp"] = it }
+                    emit("header", headerEvent)
                     // Zero-byte files carry no chunks — finalise right away so
                     // the UI still receives a fileComplete event.
                     if (h.size == 0L) {

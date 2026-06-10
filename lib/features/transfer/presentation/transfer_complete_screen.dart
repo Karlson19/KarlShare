@@ -40,10 +40,15 @@ class _TransferCompleteScreenState
     HapticFeedback.heavyImpact();
   }
 
-  void _reset() {
+  /// Clears the finished transfer. [keepDevice] preserves the connected peer
+  /// so "Send More" goes straight to picking files for the same device — the
+  /// session persists instead of forcing a re-scan for every send.
+  void _reset({bool keepDevice = false}) {
     ref.read(activeTransferProvider.notifier).cancel();
     ref.read(selectedFilesProvider.notifier).state = [];
-    ref.read(selectedDeviceProvider.notifier).state = null;
+    if (!keepDevice) {
+      ref.read(selectedDeviceProvider.notifier).state = null;
+    }
   }
 
   /// The folder a received transfer was saved into, derived from the first
@@ -103,7 +108,7 @@ class _TransferCompleteScreenState
               label: 'Send More',
               variant: KarlshareButtonVariant.secondary,
               onPressed: () {
-                _reset();
+                _reset(keepDevice: true);
                 context.go(RoutePaths.filePicker);
               },
             ),

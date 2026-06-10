@@ -14,7 +14,6 @@ class RoutePaths {
   static const String sendConnect = '/send-connect';
   static const String history = '/history';
   static const String settings = '/settings';
-  static const String qrPair = '/qr-pair';
   static const String privacy = '/settings/privacy';
   static const String terms = '/settings/terms';
 }

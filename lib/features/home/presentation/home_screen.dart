@@ -105,8 +105,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.qr_code_rounded),
-            onPressed: () => context.push(RoutePaths.qrPair),
+            icon: const Icon(Icons.qr_code_scanner_rounded),
+            tooltip: 'Scan to connect',
+            // The working scan flow — connects straight to whatever device's
+            // QR you point at (a PC's code or a phone hosting a hotspot).
+            onPressed: () => context.push(RoutePaths.sendConnect),
           ),
         ],
       ),

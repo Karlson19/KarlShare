@@ -116,9 +116,20 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
 
   @override
   void dispose() {
+    // Deliberately do NOT stop the hotspot here. This screen is disposed
+    // automatically when an incoming transfer navigates away — killing the
+    // hotspot at that moment would collapse the network mid-transfer. The
+    // session outlives the screen (Xender model): both devices stay connected
+    // for repeat sends in either direction. The hotspot ends only when the
+    // user explicitly closes this screen, or Android tears it down with the
+    // app.
     _sub?.cancel();
-    ref.read(hotspotServiceProvider).stopHotspot();
     super.dispose();
+  }
+
+  void _close() {
+    ref.read(hotspotServiceProvider).stopHotspot();
+    context.pop();
   }
 
   @override
@@ -139,7 +150,7 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
       appBar: AppBar(
         title: const Text('Receive'),
         leading: IconButton(
-            icon: const Icon(Icons.close_rounded), onPressed: context.pop),
+            icon: const Icon(Icons.close_rounded), onPressed: _close),
       ),
       body: SafeArea(
         child: Padding(
