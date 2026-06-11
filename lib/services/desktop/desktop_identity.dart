@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -7,9 +8,13 @@ import 'package:basic_utils/basic_utils.dart';
 import 'package:crypto/crypto.dart' show sha256;
 import 'package:path_provider/path_provider.dart';
 
-/// The desktop's TLS identity: a self-signed RSA cert generated once and
-/// reused. The binding fingerprint is SHA-256 of the whole certificate DER, the
-/// same scheme Android uses, so the cross-platform handshake matches.
+/// The app's TLS identity wherever the Dart engine runs (Android + desktop):
+/// a self-signed RSA cert generated once and reused via dart:io's
+/// SecurityContext. The old Android path — an ECDSA key locked in the
+/// hardware keystore — could not complete a server-side TLS handshake against
+/// BoringSSL clients, which is why the Dart engine (and this identity) now
+/// serves on phones too. The binding fingerprint is SHA-256 of the whole
+/// certificate DER on every platform.
 class DesktopIdentity {
   DesktopIdentity._({
     required this.deviceId,
@@ -45,16 +50,25 @@ class DesktopIdentity {
       keyPem = keyFile.readAsStringSync();
       deviceId = _hexToBytes(idFile.readAsStringSync().trim());
     } else {
-      final pair = CryptoUtils.generateRSAKeyPair(keySize: 2048);
-      final priv = pair.privateKey as RSAPrivateKey;
-      final pub = pair.publicKey as RSAPublicKey;
-      final csr = X509Utils.generateRsaCsrPem(
-        {'CN': Platform.localHostname, 'O': 'Karlshare'},
-        priv,
-        pub,
-      );
-      certPem = X509Utils.generateSelfSignedCertificate(priv, csr, 3650);
-      keyPem = CryptoUtils.encodeRSAPrivateKeyToPem(priv);
+      // RSA keygen takes seconds of pure CPU — run it in an isolate so the
+      // UI (especially on phones) doesn't freeze during first launch.
+      final cn = Platform.localHostname;
+      final pems = await Isolate.run(() {
+        final pair = CryptoUtils.generateRSAKeyPair(keySize: 2048);
+        final priv = pair.privateKey as RSAPrivateKey;
+        final pub = pair.publicKey as RSAPublicKey;
+        final csr = X509Utils.generateRsaCsrPem(
+          {'CN': cn, 'O': 'Karlshare'},
+          priv,
+          pub,
+        );
+        return [
+          X509Utils.generateSelfSignedCertificate(priv, csr, 3650),
+          CryptoUtils.encodeRSAPrivateKeyToPem(priv),
+        ];
+      });
+      certPem = pems[0];
+      keyPem = pems[1];
       deviceId = _randomBytes(16);
       certFile.writeAsStringSync(certPem);
       keyFile.writeAsStringSync(keyPem);

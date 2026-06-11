@@ -15,6 +15,7 @@ import '../../../core/widgets/sankofa_mark.dart';
 import '../../../models/device.dart';
 import '../../../models/enums.dart';
 import '../../../models/transfer.dart';
+import '../../file_picker/providers/file_selection_provider.dart';
 import '../providers/transfer_provider.dart';
 
 class TransferCompleteScreen extends ConsumerStatefulWidget {
@@ -46,6 +47,12 @@ class _TransferCompleteScreenState
   void _reset({bool keepDevice = false}) {
     ref.read(activeTransferProvider.notifier).cancel();
     ref.read(selectedFilesProvider.notifier).state = [];
+    // The picker keeps its check-marks while it sits in the nav stack — if we
+    // don't clear them after a SUCCESSFUL send, the next send silently
+    // re-sends every previously sent file alongside the new ones (and the
+    // receiver dedup-renames the copies). Cancel/failure paths deliberately
+    // keep the selection so a retry doesn't mean re-picking.
+    ref.read(fileSelectionProvider.notifier).clear();
     if (!keepDevice) {
       ref.read(selectedDeviceProvider.notifier).state = null;
     }
@@ -84,6 +91,7 @@ class _TransferCompleteScreenState
   void _sendBack(Device device) {
     ref.read(activeTransferProvider.notifier).cancel();
     ref.read(selectedFilesProvider.notifier).state = [];
+    ref.read(fileSelectionProvider.notifier).clear();
     ref.read(selectedDeviceProvider.notifier).state = device;
     context.go(RoutePaths.filePicker);
   }
