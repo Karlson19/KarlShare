@@ -4,6 +4,7 @@ import android.content.Context
 import com.karlshare.karlshare.apps.InstalledAppsService
 import com.karlshare.karlshare.discovery.DiscoveryService
 import com.karlshare.karlshare.discovery.HotspotManager
+import com.karlshare.karlshare.transfer.StoreChannel
 import com.karlshare.karlshare.transfer.TransferEngine
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -15,6 +16,7 @@ class MainActivity : FlutterActivity() {
     private var transfer: TransferEngine? = null
     private var apps: InstalledAppsService? = null
     private var hotspot: HotspotManager? = null
+    private var store: StoreChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -25,6 +27,7 @@ class MainActivity : FlutterActivity() {
         transfer = TransferEngine(applicationContext, messenger, id)
         apps = InstalledAppsService(applicationContext, messenger)
         hotspot = HotspotManager(applicationContext, messenger)
+        store = StoreChannel(applicationContext, messenger)
     }
 
     override fun onDestroy() {
@@ -32,6 +35,7 @@ class MainActivity : FlutterActivity() {
         transfer?.dispose(); transfer = null
         apps?.dispose(); apps = null
         hotspot?.dispose(); hotspot = null
+        store?.dispose(); store = null
         super.onDestroy()
     }
 

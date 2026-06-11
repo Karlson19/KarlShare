@@ -14,6 +14,7 @@ class OutgoingFile {
     required this.name,
     required this.mime,
     required this.size,
+    this.id,
   });
 
   final String path;
@@ -21,11 +22,16 @@ class OutgoingFile {
   final String mime;
   final int size;
 
+  /// The caller's id for this file (the picker's). The engine echoes it in
+  /// progress events so the sender UI can match them to its existing rows.
+  final String? id;
+
   Map<String, dynamic> toMap() => {
         'path': path,
         'name': name,
         'mime': mime,
         'size': size,
+        'id': id,
       };
 }
 
@@ -103,16 +109,45 @@ class TransferService {
   Stream<TransferEvent>? _cached;
   DartTransferEngine? _engine;
 
-  bool get _channelSupported =>
-      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
-  bool get _isDesktop =>
-      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
-  DartTransferEngine _ensureEngine() => _engine ??= DartTransferEngine();
+  /// iOS still rides its native Multipeer/Network.framework bridge.
+  bool get _channelSupported => !kIsWeb && Platform.isIOS;
 
-  bool get isPlatformSupported => _channelSupported || _isDesktop;
+  /// Android and desktop share the one pure-Dart engine — both ends of a
+  /// transfer run the exact code the loopback test verifies. (The Kotlin
+  /// engine is retired from the transfer path: its hardware-keystore TLS
+  /// server failed on real phones in ways we can't debug remotely.)
+  bool get _useDartEngine =>
+      !kIsWeb &&
+      (Platform.isAndroid ||
+          Platform.isWindows ||
+          Platform.isLinux ||
+          Platform.isMacOS);
+
+  DartTransferEngine _ensureEngine() {
+    final engine = _engine ??= DartTransferEngine();
+    if (!kIsWeb && Platform.isAndroid) {
+      // Hand verified files to MediaStore so they land in Gallery/Files under
+      // Pictures|Movies|Music|Download /Karlshare with their original names.
+      engine.publishReceivedFile ??= (path, name, mime) async {
+        try {
+          return await const MethodChannel('karlshare/store')
+              .invokeMethod<String>('publish', {
+            'path': path,
+            'name': name,
+            'mime': mime,
+          });
+        } catch (_) {
+          return null; // keep the app-private copy; transfer already succeeded
+        }
+      };
+    }
+    return engine;
+  }
+
+  bool get isPlatformSupported => _channelSupported || _useDartEngine;
 
   Future<void> startServer() async {
-    if (_isDesktop) {
+    if (_useDartEngine) {
       await _ensureEngine().startServer();
       return;
     }
@@ -121,7 +156,7 @@ class TransferService {
   }
 
   Future<void> stopServer() async {
-    if (_isDesktop) {
+    if (_useDartEngine) {
       await _ensureEngine().stopServer();
       return;
     }
@@ -130,7 +165,7 @@ class TransferService {
   }
 
   Future<void> setSaveDir(String path) async {
-    if (_isDesktop) return; // desktop engine manages its own save folder
+    if (_useDartEngine) return; // desktop engine manages its own save folder
     if (!_channelSupported) return;
     await _method.invokeMethod<void>('setSaveDir', {'path': path});
   }
@@ -141,7 +176,7 @@ class TransferService {
     required String peerIp,
     required List<OutgoingFile> files,
   }) async {
-    if (_isDesktop) return _ensureEngine().sendFiles(peerIp, files);
+    if (_useDartEngine) return _ensureEngine().sendFiles(peerIp, files);
     if (!_channelSupported) return null;
     return _method.invokeMethod<String>('sendFiles', {
       'peerIp': peerIp,
@@ -150,7 +185,7 @@ class TransferService {
   }
 
   Future<void> cancel(String transferId) async {
-    if (_isDesktop) {
+    if (_useDartEngine) {
       await _ensureEngine().cancel(transferId);
       return;
     }
@@ -160,7 +195,7 @@ class TransferService {
 
   /// Clears every trusted-peer fingerprint (Settings ▸ Reset paired devices).
   Future<void> forgetAllPeers() async {
-    if (_isDesktop) {
+    if (_useDartEngine) {
       await _ensureEngine().forgetAllPeers();
       return;
     }
@@ -169,7 +204,7 @@ class TransferService {
   }
 
   Stream<TransferEvent> events() {
-    if (_isDesktop) return _ensureEngine().events();
+    if (_useDartEngine) return _ensureEngine().events();
     if (!_channelSupported) return const Stream.empty();
     return _cached ??= _events
         .receiveBroadcastStream()

@@ -67,6 +67,7 @@ class ActiveTransferNotifier extends StateNotifier<Transfer?> {
     final outgoing = files
         .where((f) => f.path != null && f.path!.isNotEmpty)
         .map((f) => OutgoingFile(
+              id: f.id,
               path: f.path!,
               name: f.name,
               mime: 'application/octet-stream',

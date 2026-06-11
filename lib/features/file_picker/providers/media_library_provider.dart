@@ -24,10 +24,25 @@ Future<MediaAsset?> _toMediaAsset(AssetEntity entity) async {
   final file = await entity.file;
   if (file == null) return null;
   final size = await file.length();
+
+  // The real filename. `title` is often empty until queried asynchronously —
+  // and the numeric-id fallback used to leak through to the receiver, who'd
+  // get "1000023.jpg" instead of "IMG_2301.jpg".
+  var name = entity.title ?? '';
+  if (name.isEmpty) {
+    try {
+      name = await entity.titleAsync;
+    } catch (_) {}
+  }
+  if (name.isEmpty) {
+    final base = file.uri.pathSegments.isNotEmpty ? file.uri.pathSegments.last : '';
+    name = base.isNotEmpty ? base : '${entity.id}.${_extFor(entity.type)}';
+  }
+
   return MediaAsset(
     file: TransferFile(
       id: entity.id,
-      name: entity.title ?? '${entity.id}.${_extFor(entity.type)}',
+      name: name,
       sizeBytes: size,
       type: _kFileTypeFor(entity.type),
       path: file.path,

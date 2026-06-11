@@ -12,10 +12,9 @@ import '../transfer_service.dart';
 import 'desktop_identity.dart';
 import 'karlshare_wire.dart';
 
-/// Pure-Dart TLS transfer engine for desktop (Windows/Linux/macOS). Speaks the
-/// same Karlshare wire protocol and fingerprint-bound handshake as the Android
-/// engine, so a PC and a phone interoperate. Produces [TransferEvent]s that the
-/// existing UI consumes unchanged.
+/// Pure-Dart TLS transfer engine. Runs on desktop (Windows/Linux/macOS) AND on
+/// Android — both ends of a transfer execute this same code, which is what the
+/// loopback test verifies. Produces [TransferEvent]s the UI consumes unchanged.
 class DartTransferEngine {
   final _controller = StreamController<TransferEvent>.broadcast();
   final _rand = Random.secure();
@@ -23,6 +22,14 @@ class DartTransferEngine {
 
   SecureServerSocket? _server;
   Directory? _saveDir;
+
+  /// Platform hook: moves a fully-received, checksum-verified file from the
+  /// app-private save dir to wherever the user can see it (Android hands it to
+  /// MediaStore so it appears in Gallery/Files). Returns the user-facing
+  /// location, or null to keep the original path. Errors here must not fail
+  /// the transfer — the file is already intact.
+  Future<String?> Function(String path, String name, String mime)?
+      publishReceivedFile;
 
   Stream<TransferEvent> events() => _controller.stream;
 
@@ -194,11 +201,21 @@ class DartTransferEngine {
         await rf.target.delete();
       } catch (_) {}
     }
+    var savePath = rf.target.path;
+    if (ok && publishReceivedFile != null) {
+      try {
+        final published = await publishReceivedFile!(
+            rf.target.path, rf.header.name, rf.header.mime);
+        if (published != null && published.isNotEmpty) savePath = published;
+      } catch (_) {
+        // Publishing is best-effort; the verified file stays at savePath.
+      }
+    }
     _emit(
       type: ok ? TransferEventType.fileComplete : TransferEventType.error,
       transferId: transferId,
       fileId: fid,
-      savePath: ok ? rf.target.path : null,
+      savePath: ok ? savePath : null,
       message: ok ? null : 'checksum mismatch',
     );
   }
@@ -267,7 +284,9 @@ class DartTransferEngine {
     final file = File(f.path);
     final checksum = await _sha256File(file);
     final fileId = _rand16();
-    final fid = _hex(fileId);
+    // Events use the caller's file id (the picker's) so the sender UI can match
+    // progress to the rows it already shows; the wire keeps its own 16-byte id.
+    final fid = f.id ?? _hex(fileId);
     socket.add(Wire.fileHeader(
       fileId: fileId,
       name: f.name,
