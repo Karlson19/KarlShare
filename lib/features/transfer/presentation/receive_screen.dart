@@ -219,6 +219,19 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
                 const SizedBox(height: AppConstants.space8),
                 Text('Network: $_ssid',
                     style: Theme.of(context).textTheme.bodyMedium),
+                if (_password != null)
+                  Text('Password: $_password',
+                      style: Theme.of(context).textTheme.bodyMedium),
+                const SizedBox(height: AppConstants.space4),
+                Text(
+                  "Scan fails? The other phone can join this network from its "
+                  'Wi-Fi settings instead — then you appear on its radar.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(color: colors.textTertiary),
+                ),
               ],
               if (_error) ...[
                 const SizedBox(height: AppConstants.space12),

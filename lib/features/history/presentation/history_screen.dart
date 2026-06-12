@@ -13,6 +13,10 @@ import '../../../models/transfer.dart';
 import '../providers/history_provider.dart';
 import '../widgets/history_tile.dart';
 
+/// Live search query for the history lists (file or device names).
+final _historySearchProvider =
+    StateProvider.autoDispose<String>((ref) => '');
+
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
 
@@ -73,11 +77,96 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
           ),
         ],
       ),
-      body: TabBarView(
-        controller: _tabs,
-        children: const [
-          _HistoryList(direction: TransferDirection.sent),
-          _HistoryList(direction: TransferDirection.received),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppConstants.space16,
+              AppConstants.space12,
+              AppConstants.space16,
+              0,
+            ),
+            child: TextField(
+              onChanged: (q) =>
+                  ref.read(_historySearchProvider.notifier).state = q,
+              decoration: const InputDecoration(
+                hintText: 'Search files or devices',
+                prefixIcon: Icon(Icons.search_rounded, size: 20),
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius:
+                      BorderRadius.all(Radius.circular(AppConstants.radiusSmall)),
+                ),
+              ),
+            ),
+          ),
+          const _StorageSummary(),
+          Expanded(
+            child: TabBarView(
+              controller: _tabs,
+              children: const [
+                _HistoryList(direction: TransferDirection.sent),
+                _HistoryList(direction: TransferDirection.received),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Totals across the whole log: how much has moved through Karlshare.
+class _StorageSummary extends ConsumerWidget {
+  const _StorageSummary();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final all = ref.watch(historyProvider);
+    if (all.isEmpty) return const SizedBox.shrink();
+    var sentBytes = 0;
+    var receivedBytes = 0;
+    for (final t in all) {
+      if (t.direction == TransferDirection.sent) {
+        sentBytes += t.totalBytes;
+      } else {
+        receivedBytes += t.totalBytes;
+      }
+    }
+    final colors = Theme.of(context).extension<KarlshareColors>()!;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppConstants.space20,
+        AppConstants.space8,
+        AppConstants.space20,
+        AppConstants.space4,
+      ),
+      child: Row(
+        children: [
+          Text(
+            '${all.length} transfers',
+            style: Theme.of(context)
+                .textTheme
+                .labelMedium
+                ?.copyWith(color: colors.textSecondary),
+          ),
+          const Spacer(),
+          Icon(Icons.north_east_rounded, size: 12, color: AppColors.gold),
+          Text(
+            ' ${FormatUtils.fileSize(sentBytes)}   ',
+            style: Theme.of(context)
+                .textTheme
+                .labelMedium
+                ?.copyWith(color: colors.textSecondary),
+          ),
+          Icon(Icons.south_west_rounded, size: 12, color: AppColors.forest),
+          Text(
+            ' ${FormatUtils.fileSize(receivedBytes)}',
+            style: Theme.of(context)
+                .textTheme
+                .labelMedium
+                ?.copyWith(color: colors.textSecondary),
+          ),
         ],
       ),
     );
@@ -91,7 +180,23 @@ class _HistoryList extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final transfers = ref.watch(historyByDirectionProvider(direction));
+    var transfers = ref.watch(historyByDirectionProvider(direction));
+    final query = ref.watch(_historySearchProvider).trim().toLowerCase();
+    if (query.isNotEmpty) {
+      transfers = transfers
+          .where((t) =>
+              t.device.name.toLowerCase().contains(query) ||
+              t.files.any((f) => f.name.toLowerCase().contains(query)))
+          .toList();
+    }
+    if (transfers.isEmpty && query.isNotEmpty) {
+      return Center(
+        child: Text(
+          'Nothing matches "$query".',
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
+      );
+    }
     if (transfers.isEmpty) return _EmptyState(direction: direction);
 
     final grouped = <String, List<Transfer>>{};

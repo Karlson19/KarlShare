@@ -9,16 +9,20 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/avatar_presets.dart';
 import '../../../core/constants/route_paths.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_gradients.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/file_utils.dart';
+import '../../../core/utils/format_utils.dart';
 import '../../../core/widgets/gradient_text.dart';
 import '../../../core/widgets/karlshare_bottom_sheet.dart';
-import '../../../core/widgets/karlshare_button.dart';
 import '../../../core/widgets/karlshare_qr.dart';
 import '../../../core/widgets/kente_pattern.dart';
 import '../../../models/device.dart';
 import '../../../models/enums.dart';
 import '../../../models/transfer.dart';
 import '../../../providers/user_provider.dart';
+import '../../history/providers/history_provider.dart';
 import '../../transfer/providers/receive_info_provider.dart';
 import '../../transfer/providers/transfer_provider.dart';
 import '../providers/discovery_provider.dart';
@@ -146,21 +150,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ref.watch(discoveryServiceProvider).isPlatformSupported,
               onInvite: () => context.push(RoutePaths.receive),
             ),
-            const SizedBox(height: AppConstants.space24),
+            const SizedBox(height: AppConstants.space16),
+            const _RecentsStrip(),
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 AppConstants.space24,
-                0,
+                AppConstants.space8,
                 AppConstants.space24,
                 AppConstants.space24,
               ),
               child: Row(
                 children: [
                   Expanded(
-                    child: KarlshareButton(
+                    child: _HeroAction(
                       label: 'Send',
-                      icon: Icons.arrow_upward_rounded,
-                      onPressed: () {
+                      sublabel: 'Photos, videos, apps',
+                      icon: Icons.north_east_rounded,
+                      primary: true,
+                      onTap: () {
                         // Choosing recipient by scanning happens after picking
                         // files, so clear any stale radar selection.
                         ref.read(selectedDeviceProvider.notifier).state = null;
@@ -170,11 +177,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ),
                   const SizedBox(width: AppConstants.space16),
                   Expanded(
-                    child: KarlshareButton(
+                    child: _HeroAction(
                       label: 'Receive',
-                      icon: Icons.arrow_downward_rounded,
-                      variant: KarlshareButtonVariant.secondary,
-                      onPressed: () => context.push(RoutePaths.receive),
+                      sublabel: 'Show your code',
+                      icon: Icons.south_west_rounded,
+                      primary: false,
+                      onTap: () => context.push(RoutePaths.receive),
                     ),
                   ),
                 ],
@@ -446,6 +454,149 @@ class _SendFromPc extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// One of the two hero actions that own the home screen. Send carries the
+/// signature gold gradient (the screen's single gradient moment); Receive is
+/// the quiet twin. Both are big enough to hit with a thumb without looking.
+class _HeroAction extends StatelessWidget {
+  const _HeroAction({
+    required this.label,
+    required this.sublabel,
+    required this.icon,
+    required this.primary,
+    required this.onTap,
+  });
+
+  final String label;
+  final String sublabel;
+  final IconData icon;
+  final bool primary;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).extension<KarlshareColors>()!;
+    const onGold = AppColors.lightTextPrimary;
+    final fg = primary ? onGold : colors.textPrimary;
+
+    return Material(
+      color: Colors.transparent,
+      child: Ink(
+        height: 92,
+        decoration: BoxDecoration(
+          gradient: primary ? AppGradients.signature : null,
+          color: primary ? null : colors.surfaceElevated,
+          border: primary ? null : Border.all(color: colors.border),
+          borderRadius: BorderRadius.circular(AppConstants.radiusMedium),
+        ),
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.lightImpact();
+            onTap();
+          },
+          borderRadius: BorderRadius.circular(AppConstants.radiusMedium),
+          child: Padding(
+            padding: const EdgeInsets.all(AppConstants.space16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Row(
+                  children: [
+                    Icon(icon, size: 22, color: fg),
+                    const SizedBox(width: AppConstants.space8),
+                    Text(
+                      label,
+                      style: Theme.of(context)
+                          .textTheme
+                          .headlineSmall
+                          ?.copyWith(color: fg),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppConstants.space4),
+                Text(
+                  sublabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: primary
+                            ? onGold.withValues(alpha: 0.75)
+                            : colors.textSecondary,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The last few transfers as a quiet horizontal strip — tap to open History.
+/// Disappears entirely when there's no history yet (no empty-state clutter on
+/// a first launch).
+class _RecentsStrip extends ConsumerWidget {
+  const _RecentsStrip();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final recents = ref.watch(historyProvider).take(5).toList();
+    if (recents.isEmpty) return const SizedBox.shrink();
+    final colors = Theme.of(context).extension<KarlshareColors>()!;
+
+    return SizedBox(
+      height: 56,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding:
+            const EdgeInsets.symmetric(horizontal: AppConstants.space24),
+        itemCount: recents.length,
+        separatorBuilder: (_, _) =>
+            const SizedBox(width: AppConstants.space8),
+        itemBuilder: (context, i) {
+          final t = recents[i];
+          final received = t.direction == TransferDirection.received;
+          final firstType =
+              t.files.isEmpty ? KFileType.other : t.files.first.type;
+          return InkWell(
+            onTap: () => context.push(RoutePaths.history),
+            borderRadius: BorderRadius.circular(AppConstants.radiusMedium),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: AppConstants.space12),
+              decoration: BoxDecoration(
+                color: colors.surfaceElevated,
+                border: Border.all(color: colors.border),
+                borderRadius: BorderRadius.circular(AppConstants.radiusMedium),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    received
+                        ? Icons.south_west_rounded
+                        : Icons.north_east_rounded,
+                    size: 16,
+                    color: received ? AppColors.forest : AppColors.gold,
+                  ),
+                  const SizedBox(width: AppConstants.space8),
+                  Icon(FileUtils.icon(firstType),
+                      size: 16, color: colors.textSecondary),
+                  const SizedBox(width: AppConstants.space8),
+                  Text(
+                    '${t.fileCount} · ${FormatUtils.fileSize(t.totalBytes)}',
+                    style: Theme.of(context).textTheme.labelMedium,
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }

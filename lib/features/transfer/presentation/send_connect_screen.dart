@@ -63,7 +63,16 @@ class _SendConnectScreenState extends ConsumerState<SendConnectScreen> {
         break;
       case HotspotEventType.joinError:
         setState(() {
-          _status = e.message ?? 'Could not join. Try scanning again.';
+          // The commonest real-world cause: the host phone opened its hotspot
+          // on a 5GHz band this phone can't see. No app can change the band,
+          // so give the two fallbacks that actually work.
+          _status = "Couldn't reach the hotspot. This phone may not see the "
+              "network the other phone created.\n\n"
+              "Fix it one of these ways:\n"
+              "• Swap roles: YOU tap Receive, and let the other phone scan "
+              "your code instead.\n"
+              "• Or put both phones on the same Wi-Fi or hotspot — you'll "
+              "find each other on the radar, no scanning needed.";
           _error = true;
           _joining = false;
         });

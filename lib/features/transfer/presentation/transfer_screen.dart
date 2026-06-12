@@ -2,6 +2,7 @@ import 'dart:io' show Platform, Process;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_constants.dart';
@@ -115,6 +116,24 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
       }
     });
 
+    // Haptics on the moments that matter: connection established (a new
+    // transfer appears), transfer complete, transfer failed. No-ops on
+    // desktop.
+    ref.listen<TransferSession>(transferSessionProvider, (prev, next) {
+      final before = prev?.transfers ?? const <String, Transfer>{};
+      for (final t in next.transfers.values) {
+        final old = before[t.id]?.status;
+        if (old == t.status) continue;
+        if (old == null && t.status == TransferStatus.transferring) {
+          HapticFeedback.lightImpact();
+        } else if (t.status == TransferStatus.completed) {
+          HapticFeedback.mediumImpact();
+        } else if (t.status == TransferStatus.failed) {
+          HapticFeedback.heavyImpact();
+        }
+      }
+    });
+
     final session = ref.watch(transferSessionProvider);
     final notifier = ref.read(transferSessionProvider.notifier);
     final profile = ref.watch(userProfileProvider);
@@ -153,9 +172,13 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
         ),
       ),
       body: SafeArea(
-        child: transfers.isEmpty
-            ? _Pending(error: _startError, onBack: _leave)
-            : Column(
+        // Wide desktop windows get a centered column, not a stretched phone.
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: transfers.isEmpty
+                ? _Pending(error: _startError, onBack: _leave)
+                : Column(
                 children: [
                   if (notifier.lastError != null &&
                       transfers.any((t) => t.status == TransferStatus.failed))
@@ -194,6 +217,8 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
                   ),
                 ],
               ),
+          ),
+        ),
       ),
     );
   }

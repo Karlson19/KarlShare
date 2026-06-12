@@ -253,7 +253,10 @@ class HotspotManager(
         }
         joinCallback = callback
         try {
-            connectivity.requestNetwork(request, callback)
+            // With a timeout, onUnavailable fires reliably when the system
+            // dialog can't find the hotspot (commonly: the host started on a
+            // 5GHz band this phone can't see) instead of hanging forever.
+            connectivity.requestNetwork(request, callback, 60_000)
         } catch (t: Throwable) {
             emit("joinError", mapOf("message" to (t.message ?: "Join failed")))
         }
