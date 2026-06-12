@@ -319,10 +319,27 @@ class TransferSessionNotifier extends StateNotifier<TransferSession> {
         id: event.fileId ?? const Uuid().v4(),
         name: event.fileName ?? 'file',
         sizeBytes: event.fileSize,
-        type: KFileType.other,
+        type: _inferType(event.fileName ?? ''),
         progress: 0,
         path: event.savePath,
       );
+
+  /// The wire mime is a generic octet-stream, so received files get their
+  /// type (icon, accent color) from the extension.
+  static KFileType _inferType(String name) {
+    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+    return switch (ext) {
+      'jpg' || 'jpeg' || 'png' || 'gif' || 'webp' || 'heic' || 'bmp' =>
+        KFileType.image,
+      'mp4' || 'mkv' || 'avi' || 'mov' || 'webm' || '3gp' => KFileType.video,
+      'mp3' || 'wav' || 'm4a' || 'ogg' || 'flac' || 'aac' => KFileType.audio,
+      'apk' => KFileType.app,
+      'pdf' || 'doc' || 'docx' || 'xls' || 'xlsx' || 'ppt' || 'pptx' ||
+      'txt' || 'zip' || 'rar' || '7z' =>
+        KFileType.document,
+      _ => KFileType.other,
+    };
+  }
 
   double _sampleSpeed(String id, int totalBytes, double current) {
     final now = DateTime.now();
@@ -388,14 +405,17 @@ class TransferSessionNotifier extends StateNotifier<TransferSession> {
   /// Cancels the focused transfer and removes it from the session.
   Future<void> cancel() async {
     final id = _focusedId;
-    if (id != null) {
-      await _ref.read(transferServiceProvider).cancel(id);
-      final removed = _working.remove(id);
-      if (removed != null) _shrinkIntegrityBaseline(removed);
-      _lastBytes.remove(id);
-      _lastSample.remove(id);
-      _focusedId = _latestActiveId();
-    }
+    if (id != null) await cancelById(id);
+  }
+
+  /// Cancels one specific transfer and removes it from the session.
+  Future<void> cancelById(String id) async {
+    await _ref.read(transferServiceProvider).cancel(id);
+    final removed = _working.remove(id);
+    if (removed != null) _shrinkIntegrityBaseline(removed);
+    _lastBytes.remove(id);
+    _lastSample.remove(id);
+    if (_focusedId == id) _focusedId = _latestActiveId();
     _flush();
   }
 
