@@ -1,53 +1,75 @@
 import 'package:flutter/material.dart';
 
-/// Karlshare color palette (Section 3.1, refined).
+/// Karlshare color tokens — the "modern Kente" system.
 ///
-/// Tuning notes from the v1 redesign:
-/// * Light background shifted off pure white to a warm cream (#FAF8F5) so
-///   surfaces can elevate with real depth. Cards stay true white.
-/// * Dark surface ladder lifted and widened (#0D0D0F / #161618 / #1E1E22)
-///   so cards visibly sit above the scaffold without needing a gradient
-///   border halo.
-/// * Electric purple is the single UI accent (tabs, active states, links).
-///   The full signature gradient is reserved for hero moments (CTAs, brand
-///   mark, transfer animation) — see [AppGradients] policy.
+/// Identity rules:
+/// * DARK IS THE DEFAULT. The base is a near-black with a warm, earthen
+///   undertone (#141210 family) — never a cold blue-black. Light mode is the
+///   secondary theme: warm paper, true-white cards.
+/// * GOLD is the primary. One saturated gold/amber carries every interactive
+///   moment (CTAs, tabs, progress, the brand mark). Gold demands DARK
+///   foreground text — never white-on-gold.
+/// * FOREST GREEN is the single sharp accent, drawn from the Kente palette.
+///   It marks success and "receive" energy. Red exists only as semantic
+///   error. Nothing else gets a hue: restraint is the brand.
+/// * No purple anywhere. The old purple-gradient identity is retired.
 class AppColors {
   AppColors._();
 
-  // Primary brand colors
-  static const Color karlshareOrange = Color(0xFFFF6B1A);
-  static const Color royalMagenta = Color(0xFFD81E5B);
-  static const Color electricPurple = Color(0xFF7B2CBF);
-  static const Color ashantiGold = Color(0xFFFFB627);
+  // ---- Brand: gold primary --------------------------------------------------
+  /// The primary. Interactive gold — saturated, warm, neither neon nor mustard.
+  static const Color gold = Color(0xFFE6A532);
 
-  /// Single non-gradient accent. Deep, premium, less abrasive than magenta
-  /// when sitting on a white background.
-  static const Color accent = Color(0xFF6B21D9);
+  /// Gradient high / shimmer top. Use inside [AppGradients], not as a fill.
+  static const Color goldBright = Color(0xFFF4C159);
 
-  // Dark mode (lifted ladder for better elevation)
-  static const Color darkBackground = Color(0xFF0D0D0F);
-  static const Color darkSurface = Color(0xFF161618);
-  static const Color darkSurfaceElevated = Color(0xFF1E1E22);
-  static const Color darkBorder = Color(0xFF2A2A2E);
-  static const Color darkBorderStrong = Color(0xFF3A3A40);
-  static const Color darkTextPrimary = Color(0xFFF5F4F1);
-  static const Color darkTextSecondary = Color(0xFF9A9AA0);
-  static const Color darkTextTertiary = Color(0xFF5A5A60);
+  /// Pressed states, and the interactive gold on LIGHT surfaces (plain [gold]
+  /// fails contrast on white).
+  static const Color goldDeep = Color(0xFFB27C1D);
 
-  // Light mode (warm cream scaffold, true-white cards)
-  static const Color lightBackground = Color(0xFFFAF8F5);
+  // ---- Brand: the one Kente accent ------------------------------------------
+  /// Forest green — success, received files, connection-established.
+  static const Color forest = Color(0xFF2E9E63);
+
+  /// Forest on light surfaces / pressed.
+  static const Color forestDeep = Color(0xFF1E6B43);
+
+  /// Single non-gradient accent used by the Material scheme. Dark theme uses
+  /// [gold]; light theme swaps to [goldDeep] for contrast (see AppTheme).
+  static const Color accent = gold;
+
+  // ---- Dark mode (DEFAULT): warm near-black ladder ---------------------------
+  static const Color darkBackground = Color(0xFF141210);
+  static const Color darkSurface = Color(0xFF1B1814);
+  static const Color darkSurfaceElevated = Color(0xFF242019);
+  static const Color darkBorder = Color(0xFF322C22);
+  static const Color darkBorderStrong = Color(0xFF463D2E);
+  static const Color darkTextPrimary = Color(0xFFF6F1E6); // warm ivory
+  static const Color darkTextSecondary = Color(0xFFA99F8C);
+  static const Color darkTextTertiary = Color(0xFF6E6452);
+
+  // ---- Light mode (secondary): warm paper, true-white cards ------------------
+  static const Color lightBackground = Color(0xFFFAF6ED);
   static const Color lightSurface = Color(0xFFFFFFFF);
   static const Color lightSurfaceElevated = Color(0xFFFFFFFF);
-  static const Color lightSurfaceSunken = Color(0xFFF2EFEA);
-  static const Color lightBorder = Color(0xFFEBEAE7);
-  static const Color lightBorderStrong = Color(0xFFD7D4CE);
-  static const Color lightTextPrimary = Color(0xFF15131F);
-  static const Color lightTextSecondary = Color(0xFF6B6776);
-  static const Color lightTextTertiary = Color(0xFFA09BAA);
+  static const Color lightSurfaceSunken = Color(0xFFF1EBDE);
+  static const Color lightBorder = Color(0xFFE9E2D2);
+  static const Color lightBorderStrong = Color(0xFFD4C9B1);
+  static const Color lightTextPrimary = Color(0xFF1C170E);
+  static const Color lightTextSecondary = Color(0xFF6E6452);
+  static const Color lightTextTertiary = Color(0xFFA39A87);
 
-  // Semantic (both modes)
-  static const Color success = Color(0xFF1FBA66);
+  // ---- Semantic (both modes) -------------------------------------------------
+  static const Color success = forest;
   static const Color warning = Color(0xFFE8A317);
   static const Color error = Color(0xFFE5483E);
   static const Color info = Color(0xFF3AA9F0);
+
+  // ---- Legacy aliases (Phase 2 removes the remaining references) -------------
+  // These names survive so every existing reference re-skins into the new
+  // identity instead of breaking. Do NOT use them in new code.
+  static const Color karlshareOrange = gold;
+  static const Color royalMagenta = forest;
+  static const Color electricPurple = goldDeep;
+  static const Color ashantiGold = goldBright;
 }

@@ -3,12 +3,14 @@ import '../constants/app_constants.dart';
 import 'app_colors.dart';
 import 'app_typography.dart';
 
-/// Builds the dark and light [ThemeData] for Karlshare (Section 3).
+/// Builds the dark (default) and light [ThemeData] for Karlshare.
 ///
-/// We seed Material 3's [ColorScheme] from the brand purple so all derived
+/// We seed Material 3's [ColorScheme] from the brand gold so all derived
 /// container/surface/onColor slots stay coherent, then override the bits we
-/// care about (surface ladder, scaffold background, text). Custom colors not
-/// covered by ColorScheme live in [KarlshareColors].
+/// care about (warm surface ladder, scaffold background, text). Gold always
+/// carries DARK foreground text — white-on-gold fails contrast. On light
+/// surfaces the interactive gold deepens ([AppColors.goldDeep]) for the same
+/// reason. Custom colors not covered by ColorScheme live in [KarlshareColors].
 class AppTheme {
   AppTheme._();
 
@@ -17,6 +19,11 @@ class AppTheme {
 
   static ThemeData _build({required Brightness brightness}) {
     final isDark = brightness == Brightness.dark;
+
+    // Interactive gold per surface brightness (contrast, not taste).
+    final accent = isDark ? AppColors.gold : AppColors.goldDeep;
+    // Foreground ON gold fills is always the warm near-black.
+    const onGold = AppColors.lightTextPrimary;
 
     final background = isDark ? AppColors.darkBackground : AppColors.lightBackground;
     final surface = isDark ? AppColors.darkSurface : AppColors.lightSurface;
@@ -36,15 +43,15 @@ class AppTheme {
         isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary;
 
     final base = ColorScheme.fromSeed(
-      seedColor: AppColors.accent,
+      seedColor: AppColors.gold,
       brightness: brightness,
     );
     final colorScheme = base.copyWith(
-      primary: AppColors.accent,
-      onPrimary: Colors.white,
-      secondary: AppColors.karlshareOrange,
+      primary: accent,
+      onPrimary: onGold,
+      secondary: AppColors.forest,
       onSecondary: Colors.white,
-      tertiary: AppColors.royalMagenta,
+      tertiary: AppColors.goldDeep,
       onTertiary: Colors.white,
       error: AppColors.error,
       onError: Colors.white,
@@ -66,8 +73,8 @@ class AppTheme {
       colorScheme: colorScheme,
       textTheme: AppTypography.textTheme(textPrimary, textSecondary),
       dividerColor: border,
-      splashColor: AppColors.accent.withValues(alpha: isDark ? 0.10 : 0.06),
-      highlightColor: AppColors.accent.withValues(alpha: isDark ? 0.06 : 0.04),
+      splashColor: accent.withValues(alpha: isDark ? 0.10 : 0.06),
+      highlightColor: accent.withValues(alpha: isDark ? 0.06 : 0.04),
       iconTheme: IconThemeData(color: textPrimary),
       appBarTheme: AppBarTheme(
         backgroundColor: background,
@@ -88,9 +95,9 @@ class AppTheme {
         ),
       ),
       tabBarTheme: TabBarThemeData(
-        labelColor: AppColors.accent,
+        labelColor: accent,
         unselectedLabelColor: textSecondary,
-        indicatorColor: AppColors.accent,
+        indicatorColor: accent,
         indicatorSize: TabBarIndicatorSize.label,
         dividerColor: Colors.transparent,
         labelStyle: AppTypography.heading3.copyWith(
@@ -104,12 +111,10 @@ class AppTheme {
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? Colors.white : textTertiary,
+          (s) => s.contains(WidgetState.selected) ? onGold : textTertiary,
         ),
         trackColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected)
-              ? AppColors.accent
-              : border,
+          (s) => s.contains(WidgetState.selected) ? accent : border,
         ),
         trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
       ),
@@ -132,8 +137,8 @@ class AppTheme {
           borderRadius: BorderRadius.circular(AppConstants.radiusLarge),
         ),
       ),
-      progressIndicatorTheme: const ProgressIndicatorThemeData(
-        color: AppColors.accent,
+      progressIndicatorTheme: ProgressIndicatorThemeData(
+        color: accent,
       ),
       extensions: <ThemeExtension<dynamic>>[
         KarlshareColors(
@@ -146,14 +151,12 @@ class AppTheme {
           textPrimary: textPrimary,
           textSecondary: textSecondary,
           textTertiary: textTertiary,
-          accent: AppColors.accent,
-          accentSoft: AppColors.accent.withValues(alpha: isDark ? 0.20 : 0.12),
-          shadow: isDark
-              ? Colors.transparent
-              : const Color(0x0F15131F),
-          shadowStrong: isDark
-              ? Colors.transparent
-              : const Color(0x1A15131F),
+          accent: accent,
+          accentSoft: accent.withValues(alpha: isDark ? 0.20 : 0.12),
+          // Warm-black shadows; dark mode elevates via the surface ladder
+          // instead of shadows.
+          shadow: isDark ? Colors.transparent : const Color(0x0F1C170E),
+          shadowStrong: isDark ? Colors.transparent : const Color(0x1A1C170E),
         ),
       ],
     );
