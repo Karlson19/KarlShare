@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import '../../../models/device.dart';
@@ -24,12 +25,72 @@ final selectedDeviceProvider = StateProvider<Device?>((ref) => null);
 /// with one tap, without waiting for the radar to rediscover it.
 final lastReceivedDeviceProvider = StateProvider<Device?>((ref) => null);
 
-/// Drives an active transfer by forwarding native [TransferEvent]s into the
-/// app's [Transfer] domain model. On platforms where the native bridge isn't
-/// available (no Android), [start] reports failure and the UI shows a graceful
-/// fallback.
-class ActiveTransferNotifier extends StateNotifier<Transfer?> {
-  ActiveTransferNotifier(this._ref) : super(null) {
+/// Immutable snapshot of every transfer in the current exchange session.
+///
+/// A session is MANY transfers: the peer can send batch after batch, and both
+/// sides can send simultaneously (the Xender model). The previous state held
+/// exactly one transfer and silently discarded events for any other id — which
+/// is why received files stopped appearing mid-session: the engine wrote them
+/// to disk while the UI never heard about them. Here every event lands on its
+/// transfer, keyed by id, and nothing is ever dropped.
+class TransferSession {
+  const TransferSession({
+    this.transfers = const {},
+    this.focusedId,
+    this.protocolFilesDone = 0,
+  });
+
+  /// All transfers this session, in arrival order (map literal preserves
+  /// insertion order).
+  final Map<String, Transfer> transfers;
+
+  /// The transfer the classic single-transfer screens follow — the most
+  /// recently started or adopted one.
+  final String? focusedId;
+
+  /// Received files completed at the PROTOCOL layer. The session integrity
+  /// check compares this against what the UI actually renders.
+  final int protocolFilesDone;
+
+  Transfer? get focused => focusedId == null ? null : transfers[focusedId];
+
+  List<Transfer> get all => List.unmodifiable(transfers.values);
+
+  List<Transfer> get received => transfers.values
+      .where((t) => t.direction == TransferDirection.received)
+      .toList(growable: false);
+
+  List<Transfer> get sent => transfers.values
+      .where((t) => t.direction == TransferDirection.sent)
+      .toList(growable: false);
+
+  bool get hasActive => transfers.values.any((t) =>
+      t.status == TransferStatus.transferring ||
+      t.status == TransferStatus.paused ||
+      t.status == TransferStatus.pending);
+
+  /// Received files the UI can see at 100% — must equal [protocolFilesDone].
+  int get renderedReceivedFilesDone => transfers.values
+      .where((t) => t.direction == TransferDirection.received)
+      .expand((t) => t.files)
+      .where((f) => f.progress >= 1.0)
+      .length;
+}
+
+/// Routes every engine [TransferEvent] into the session, keyed by transfer id.
+///
+/// Correctness rules, learned the hard way:
+///  * NO stale-id guard. Events for an unknown id create a transfer (incoming
+///    headers) or a placeholder (our own `started` racing ahead of [start]'s
+///    return) — they are never discarded.
+///  * Progress events are coalesced: the mutable working set absorbs them and
+///    the immutable state is emitted at most ~30×/sec, so a fast sender can't
+///    flood the widget tree into jank. Structural events (header, completion,
+///    error) flush immediately.
+///  * An integrity counter cross-checks protocol-layer completions against
+///    rendered completions and logs loudly if they ever diverge.
+class TransferSessionNotifier extends StateNotifier<TransferSession> {
+  TransferSessionNotifier(this._ref) : super(const TransferSession()) {
     // Always listen, so INCOMING transfers (where we never called start)
     // populate state and the UI can react. The receiver's server is started
     // from the home screen.
@@ -41,19 +102,25 @@ class ActiveTransferNotifier extends StateNotifier<Transfer?> {
 
   final Ref _ref;
   StreamSubscription<TransferEvent>? _eventSub;
-  String? _activeTransferId;
+
+  /// Mutable working set, flushed into immutable [state] by [_flush].
+  final Map<String, Transfer> _working = {};
+  String? _focusedId;
+  int _protocolFilesDone = 0;
+  Timer? _flushTimer;
   DateTime? _startedAt;
-  double _speedBytesPerSec = 0;
-  int _lastTotalBytes = 0;
-  DateTime _lastSpeedSample = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // Per-transfer speed sampling (totalBytes deltas over >=200ms windows).
+  final Map<String, int> _lastBytes = {};
+  final Map<String, DateTime> _lastSample = {};
 
   /// Last error message from the engine, shown on the transfer screen when a
   /// transfer fails so problems are visible (no cable for logs).
   String? lastError;
 
   /// Returns true when the transfer was successfully dispatched into the
-  /// native engine. False → caller should surface an explanation (no
-  /// recipient IP, platform unsupported, etc).
+  /// engine. False → caller should surface an explanation (no recipient IP,
+  /// platform unsupported, etc).
   Future<bool> start({
     required Device device,
     required List<TransferFile> files,
@@ -80,112 +147,172 @@ class ActiveTransferNotifier extends StateNotifier<Transfer?> {
     if (transferId == null) {
       return false;
     }
-    _activeTransferId = transferId;
-    _startedAt = DateTime.now();
-    _lastSpeedSample = DateTime.now();
-    _lastTotalBytes = 0;
 
-    state = Transfer(
-      id: transferId,
-      device: device,
-      direction: direction,
-      files: files.map((f) => f.copyWith(progress: 0)).toList(),
-      timestamp: DateTime.now(),
-      status: TransferStatus.transferring,
-    );
+    final pickerFiles = files.map((f) => f.copyWith(progress: 0)).toList();
+    final racedAhead = _working[transferId];
+    if (racedAhead == null) {
+      _working[transferId] = Transfer(
+        id: transferId,
+        device: device,
+        direction: direction,
+        files: pickerFiles,
+        timestamp: DateTime.now(),
+        status: TransferStatus.transferring,
+      );
+    } else {
+      // The engine emitted started/header events before sendFiles returned.
+      // Keep any progress it already reported (file ids match: the engine
+      // echoes the picker's ids), but attach the real device and the picker's
+      // richer file metadata (types, names).
+      final seenById = {for (final f in racedAhead.files) f.id: f};
+      _working[transferId] = racedAhead.copyWith(
+        device: device,
+        status: TransferStatus.transferring,
+        files: pickerFiles.map((f) {
+          final seen = seenById[f.id];
+          return seen == null
+              ? f
+              : f.copyWith(progress: seen.progress, path: seen.path);
+        }).toList(),
+      );
+    }
+    _focusedId = transferId;
+    _startedAt = DateTime.now();
+    _flush();
     return true;
   }
 
   void _onEvent(TransferEvent event) {
-    final current = state;
-
-    // The first frame of any transfer is its header. If a header arrives for a
-    // different transfer than the one we're tracking, and the tracked one has
-    // already finished (or we aren't tracking any), it's a brand-new incoming
-    // transfer — adopt it. Without this, a transfer that arrives right after
-    // one completes is dropped by the stale-id guard below (or merged into the
-    // finished transfer), so the receiver never sees it.
-    if (event.type == TransferEventType.header &&
-        event.transferId != _activeTransferId &&
-        _isFinished(current)) {
-      _beginIncoming(event);
-      return;
-    }
-
-    // Ignore events that belong to a different transfer than the active one.
-    if (_activeTransferId != null && event.transferId != _activeTransferId) {
-      return;
-    }
     switch (event.type) {
       case TransferEventType.started:
+        // Sender-side announcement: create the slot so headers racing ahead
+        // of start()'s return have somewhere to land.
+        _working.putIfAbsent(
+          event.transferId,
+          () => Transfer(
+            id: event.transferId,
+            device: const Device(
+              id: 'pending',
+              name: 'Connecting…',
+              status: DeviceStatus.connecting,
+            ),
+            direction: event.direction == 'received'
+                ? TransferDirection.received
+                : TransferDirection.sent,
+            files: const [],
+            timestamp: DateTime.now(),
+            status: TransferStatus.transferring,
+          ),
+        );
+        _flush();
         break;
+
       case TransferEventType.header:
-        // Additional file within the transfer we're already tracking.
-        if (current != null &&
-            !current.files.any((f) => f.id == (event.fileId ?? ''))) {
-          state = current.copyWith(
-            files: [...current.files, _fileFrom(event)],
-          );
-        }
+        _onHeader(event);
+        _flush();
         break;
+
       case TransferEventType.progress:
-        if (current == null) return;
-        final updated = current.files.map((f) {
+        final t = _working[event.transferId];
+        if (t == null) break;
+        final files = t.files.map((f) {
           if (f.id != event.fileId) return f;
-          final progress = event.fileTotal == 0
+          final p = event.fileTotal == 0
               ? 0.0
               : event.fileBytes / event.fileTotal;
-          return f.copyWith(progress: progress.clamp(0.0, 1.0));
+          return f.copyWith(progress: p.clamp(0.0, 1.0));
         }).toList();
-        _refreshSpeed(event.totalBytes);
-        state = current.copyWith(
-          files: updated,
-          speedBytesPerSec: _speedBytesPerSec,
+        _working[event.transferId] = t.copyWith(
+          files: files,
+          speedBytesPerSec:
+              _sampleSpeed(event.transferId, event.totalBytes, t.speedBytesPerSec),
         );
+        _scheduleFlush();
         break;
+
       case TransferEventType.fileComplete:
-        if (current == null) return;
-        final updated = current.files.map((f) {
-          if (f.id != event.fileId) return f;
-          return f.copyWith(progress: 1.0, path: event.savePath ?? f.path);
-        }).toList();
-        state = current.copyWith(files: updated);
+        final t = _working[event.transferId];
+        if (t == null) break;
+        if (t.direction == TransferDirection.received) _protocolFilesDone++;
+        final files = t.files
+            .map((f) => f.id == event.fileId
+                ? f.copyWith(progress: 1.0, path: event.savePath ?? f.path)
+                : f)
+            .toList();
+        _working[event.transferId] = t.copyWith(files: files);
+        _flush();
         break;
+
       case TransferEventType.transferComplete:
-        if (current == null) return;
-        final finished = current.copyWith(
-          status: TransferStatus.completed,
-          speedBytesPerSec: 0,
-        );
-        state = finished;
+        final t = _working[event.transferId];
+        if (t == null) break;
+        final finished =
+            t.copyWith(status: TransferStatus.completed, speedBytesPerSec: 0);
+        _working[event.transferId] = finished;
         _ref.read(historyProvider.notifier).add(finished);
+        _flush();
         break;
+
       case TransferEventType.cancelled:
-        if (current == null) return;
-        state = current.copyWith(
-          status: TransferStatus.failed,
-          speedBytesPerSec: 0,
-        );
-        break;
       case TransferEventType.error:
-        lastError = event.message;
-        if (current == null) return;
-        state = current.copyWith(
-          status: TransferStatus.failed,
-          speedBytesPerSec: 0,
-        );
+        if (event.type == TransferEventType.error) lastError = event.message;
+        final t = _working[event.transferId];
+        if (t == null) break; // engine-level error with no transfer attached
+        _working[event.transferId] =
+            t.copyWith(status: TransferStatus.failed, speedBytesPerSec: 0);
+        _flush();
         break;
+
       case TransferEventType.retry:
-        if (current == null) return;
-        // Reset per-attempt counters — the engine starts a fresh connection.
-        _lastTotalBytes = 0;
-        _speedBytesPerSec = 0;
-        state = current.copyWith(
+        final t = _working[event.transferId];
+        if (t == null) break;
+        // Fresh connection — reset this transfer's speed sampling.
+        _lastBytes.remove(event.transferId);
+        _lastSample.remove(event.transferId);
+        _working[event.transferId] = t.copyWith(
           status: TransferStatus.paused, // UI maps paused → "Reconnecting…"
           speedBytesPerSec: 0,
         );
+        _flush();
         break;
     }
+  }
+
+  void _onHeader(TransferEvent event) {
+    final existing = _working[event.transferId];
+    if (existing != null) {
+      // Additional file within a transfer we already track.
+      if (!existing.files.any((f) => f.id == (event.fileId ?? ''))) {
+        _working[event.transferId] =
+            existing.copyWith(files: [...existing.files, _fileFrom(event)]);
+      }
+      return;
+    }
+    // A transfer we've never heard of: an incoming one (receivers get no
+    // start() call). Adopt it, focus it, and remember the sender for
+    // one-tap send-back.
+    final peerIp = event.peerIp;
+    final device = Device(
+      id: peerIp ?? 'incoming-${event.transferId}',
+      name: peerIp ?? 'Incoming device',
+      status: DeviceStatus.connecting,
+      address: peerIp,
+      ipAddress: peerIp,
+    );
+    if (peerIp != null && peerIp.isNotEmpty) {
+      _ref.read(lastReceivedDeviceProvider.notifier).state =
+          device.copyWith(status: DeviceStatus.ready);
+    }
+    _working[event.transferId] = Transfer(
+      id: event.transferId,
+      device: device,
+      direction: TransferDirection.received,
+      files: [_fileFrom(event)],
+      timestamp: DateTime.now(),
+      status: TransferStatus.transferring,
+    );
+    _focusedId = event.transferId;
+    _startedAt ??= DateTime.now();
   }
 
   TransferFile _fileFrom(TransferEvent event) => TransferFile(
@@ -197,55 +324,52 @@ class ActiveTransferNotifier extends StateNotifier<Transfer?> {
         path: event.savePath,
       );
 
-  /// A transfer is "finished" (free to be replaced by a new incoming one) when
-  /// there is none, or it has completed or failed.
-  bool _isFinished(Transfer? t) =>
-      t == null ||
-      t.status == TransferStatus.completed ||
-      t.status == TransferStatus.failed;
-
-  /// Starts tracking a fresh incoming (received) transfer from its header,
-  /// resetting the per-transfer counters so stats don't carry over from a
-  /// previous one.
-  void _beginIncoming(TransferEvent event) {
-    _activeTransferId = event.transferId;
-    _startedAt = DateTime.now();
-    _lastSpeedSample = DateTime.now();
-    _lastTotalBytes = 0;
-    _speedBytesPerSec = 0;
-    lastError = null;
-    final peerIp = event.peerIp;
-    final device = Device(
-      id: peerIp ?? 'incoming',
-      name: peerIp ?? 'Incoming device',
-      status: DeviceStatus.connecting,
-      address: peerIp,
-      ipAddress: peerIp,
-    );
-    // Remember the sender so the user can send files straight back to it.
-    if (peerIp != null && peerIp.isNotEmpty) {
-      _ref.read(lastReceivedDeviceProvider.notifier).state =
-          device.copyWith(status: DeviceStatus.ready);
-    }
-    state = Transfer(
-      id: event.transferId,
-      device: device,
-      direction: TransferDirection.received,
-      files: [_fileFrom(event)],
-      timestamp: DateTime.now(),
-      status: TransferStatus.transferring,
-    );
-  }
-
-  void _refreshSpeed(int totalBytes) {
+  double _sampleSpeed(String id, int totalBytes, double current) {
     final now = DateTime.now();
-    final dt = now.difference(_lastSpeedSample).inMilliseconds;
-    if (dt < 200) return;
-    final delta = totalBytes - _lastTotalBytes;
-    _speedBytesPerSec = delta / (dt / 1000.0);
-    _lastTotalBytes = totalBytes;
-    _lastSpeedSample = now;
+    final last = _lastSample[id];
+    if (last == null) {
+      _lastSample[id] = now;
+      _lastBytes[id] = totalBytes;
+      return current;
+    }
+    final dtMs = now.difference(last).inMilliseconds;
+    if (dtMs < 200) return current;
+    final speed = (totalBytes - (_lastBytes[id] ?? 0)) / (dtMs / 1000.0);
+    _lastSample[id] = now;
+    _lastBytes[id] = totalBytes;
+    return speed < 0 ? 0 : speed;
   }
+
+  // ---- Coalesced state emission -------------------------------------------
+
+  /// Lazy flush: progress floods collapse into ~30 state emissions per second.
+  void _scheduleFlush() {
+    _flushTimer ??= Timer(const Duration(milliseconds: 33), _flush);
+  }
+
+  /// Urgent flush: structural changes render on the next frame.
+  void _flush() {
+    _flushTimer?.cancel();
+    _flushTimer = null;
+    if (!mounted) return;
+    final next = TransferSession(
+      transfers: Map.unmodifiable(Map.of(_working)),
+      focusedId: _focusedId,
+      protocolFilesDone: _protocolFilesDone,
+    );
+    state = next;
+    // Session integrity: what the protocol finished must be what the UI shows.
+    final rendered = next.renderedReceivedFilesDone;
+    if (rendered < _protocolFilesDone) {
+      debugPrint(
+        'KARLSHARE INTEGRITY WARNING: protocol completed $_protocolFilesDone '
+        'received file(s) but the UI renders $rendered — a file was dropped '
+        'from rendering. Report this.',
+      );
+    }
+  }
+
+  // ---- Focused-transfer conveniences (the classic screens use these) ------
 
   double get elapsedSeconds {
     final start = _startedAt;
@@ -254,42 +378,87 @@ class ActiveTransferNotifier extends StateNotifier<Transfer?> {
   }
 
   double get etaSeconds {
-    final s = state;
+    final s = state.focused;
     if (s == null || s.status == TransferStatus.completed) return 0;
     final remaining = s.totalBytes - s.transferredBytes;
-    if (_speedBytesPerSec <= 0 || remaining <= 0) return 0;
-    return remaining / _speedBytesPerSec;
+    if (s.speedBytesPerSec <= 0 || remaining <= 0) return 0;
+    return remaining / s.speedBytesPerSec;
   }
 
+  /// Cancels the focused transfer and removes it from the session.
   Future<void> cancel() async {
-    final id = _activeTransferId;
+    final id = _focusedId;
     if (id != null) {
       await _ref.read(transferServiceProvider).cancel(id);
+      final removed = _working.remove(id);
+      if (removed != null) _shrinkIntegrityBaseline(removed);
+      _lastBytes.remove(id);
+      _lastSample.remove(id);
+      _focusedId = _latestActiveId();
     }
-    // Keep the event subscription alive — it's our permanent receive listener.
-    state = null;
-    _activeTransferId = null;
-    _startedAt = null;
-    _speedBytesPerSec = 0;
-    _lastTotalBytes = 0;
+    _flush();
+  }
+
+  /// Removes finished (completed/failed) transfers — the Done button. Anything
+  /// still in flight keeps running and stays visible.
+  void clearFinished() {
+    _working.removeWhere((_, t) {
+      final finished = t.status == TransferStatus.completed ||
+          t.status == TransferStatus.failed;
+      if (finished) _shrinkIntegrityBaseline(t);
+      return finished;
+    });
+    final focused = _focusedId;
+    if (focused != null && !_working.containsKey(focused)) {
+      _focusedId = _latestActiveId();
+      if (_focusedId == null) _startedAt = null;
+    }
+    _flush();
+  }
+
+  /// A transfer leaving the session takes its completed received files out of
+  /// the integrity baseline — otherwise every flush after Done would falsely
+  /// warn that the UI dropped files.
+  void _shrinkIntegrityBaseline(Transfer t) {
+    if (t.direction != TransferDirection.received) return;
+    _protocolFilesDone -= t.files.where((f) => f.progress >= 1.0).length;
+    if (_protocolFilesDone < 0) _protocolFilesDone = 0;
+  }
+
+  String? _latestActiveId() {
+    String? candidate;
+    for (final t in _working.values) {
+      if (t.status == TransferStatus.transferring ||
+          t.status == TransferStatus.paused) {
+        candidate = t.id;
+      }
+    }
+    return candidate;
   }
 
   @override
   void dispose() {
+    _flushTimer?.cancel();
     _eventSub?.cancel();
     super.dispose();
   }
 }
 
-final activeTransferProvider =
-    StateNotifierProvider<ActiveTransferNotifier, Transfer?>((ref) {
-  return ActiveTransferNotifier(ref);
+/// The session — every transfer, both directions, nothing dropped.
+final transferSessionProvider =
+    StateNotifierProvider<TransferSessionNotifier, TransferSession>((ref) {
+  return TransferSessionNotifier(ref);
+});
+
+/// The transfer the classic single-transfer screens follow (most recently
+/// started or adopted). The full picture lives in [transferSessionProvider].
+final focusedTransferProvider = Provider<Transfer?>((ref) {
+  return ref.watch(transferSessionProvider).focused;
 });
 
 /// Drives the receiver side — when the user taps "Receive" we start the TCP
-/// server. Incoming transfers populate via the same [activeTransferProvider]
-/// listener (the header event with no prior outgoing transfer flips state to
-/// received).
+/// server. Incoming transfers populate via the session listener (a header
+/// event for an unknown transfer id is adopted as a received transfer).
 final receivingProvider = StateProvider<bool>((ref) => false);
 
 Future<void> startReceiving(WidgetRef ref) async {
@@ -298,7 +467,7 @@ Future<void> startReceiving(WidgetRef ref) async {
   await service.startServer();
   // Make sure the listener is wired so incoming events flow into state.
   // ignore: unused_local_variable
-  final _ = ref.read(activeTransferProvider.notifier);
+  final _ = ref.read(transferSessionProvider.notifier);
   ref.read(receivingProvider.notifier).state = true;
 }
 

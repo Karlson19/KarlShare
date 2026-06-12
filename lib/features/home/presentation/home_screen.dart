@@ -73,12 +73,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // surfaces the transfer. Keyed on a change of transfer id (not prev == null)
     // so a transfer that arrives right after a previous one finishes still
     // navigates, even while the old, completed transfer is still in state and
-    // the success screen is on top.
-    ref.listen<Transfer?>(activeTransferProvider, (prev, next) {
+    // the success screen is on top. The isCurrent guard stops a second push
+    // when a transfer screen is already showing (bidirectional sessions adopt
+    // new incoming transfers into the same session view).
+    ref.listen<Transfer?>(focusedTransferProvider, (prev, next) {
       if (next != null &&
           next.direction == TransferDirection.received &&
           next.status == TransferStatus.transferring &&
-          prev?.id != next.id) {
+          prev?.id != next.id &&
+          ModalRoute.of(context)?.isCurrent == true) {
         context.push(RoutePaths.transfer);
       }
     });

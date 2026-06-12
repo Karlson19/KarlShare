@@ -171,10 +171,12 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<KarlshareColors>()!;
 
-    ref.listen<Transfer?>(activeTransferProvider, (prev, next) {
+    ref.listen<Transfer?>(focusedTransferProvider, (prev, next) {
       if (next != null &&
           next.direction == TransferDirection.received &&
-          prev == null) {
+          next.status == TransferStatus.transferring &&
+          prev?.id != next.id &&
+          ModalRoute.of(context)?.isCurrent == true) {
         context.pushReplacement(RoutePaths.transfer);
       }
     });

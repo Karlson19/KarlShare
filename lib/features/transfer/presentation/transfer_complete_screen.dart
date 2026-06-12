@@ -34,9 +34,9 @@ class _TransferCompleteScreenState
   @override
   void initState() {
     super.initState();
-    _snapshot = ref.read(activeTransferProvider);
+    _snapshot = ref.read(focusedTransferProvider);
     _elapsedSeconds =
-        ref.read(activeTransferProvider.notifier).elapsedSeconds;
+        ref.read(transferSessionProvider.notifier).elapsedSeconds;
     // Celebratory thud as the success burst plays (Section 6.5 hero moment).
     HapticFeedback.heavyImpact();
   }
@@ -45,7 +45,9 @@ class _TransferCompleteScreenState
   /// so "Send More" goes straight to picking files for the same device — the
   /// session persists instead of forcing a re-scan for every send.
   void _reset({bool keepDevice = false}) {
-    ref.read(activeTransferProvider.notifier).cancel();
+    // Finished transfers leave the session; in-flight ones (a peer mid-send
+    // to us) keep running and stay tracked.
+    ref.read(transferSessionProvider.notifier).clearFinished();
     ref.read(selectedFilesProvider.notifier).state = [];
     // The picker keeps its check-marks while it sits in the nav stack — if we
     // don't clear them after a SUCCESSFUL send, the next send silently
@@ -89,7 +91,7 @@ class _TransferCompleteScreenState
   /// Send files back to whoever we just received from, keeping that device
   /// selected so the file picker goes straight to the transfer.
   void _sendBack(Device device) {
-    ref.read(activeTransferProvider.notifier).cancel();
+    ref.read(transferSessionProvider.notifier).clearFinished();
     ref.read(selectedFilesProvider.notifier).state = [];
     ref.read(fileSelectionProvider.notifier).clear();
     ref.read(selectedDeviceProvider.notifier).state = device;

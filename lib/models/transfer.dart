@@ -40,13 +40,14 @@ class Transfer {
   int get fileCount => files.length;
 
   Transfer copyWith({
+    Device? device,
     List<TransferFile>? files,
     TransferStatus? status,
     double? speedBytesPerSec,
   }) =>
       Transfer(
         id: id,
-        device: device,
+        device: device ?? this.device,
         direction: direction,
         files: files ?? this.files,
         timestamp: timestamp,

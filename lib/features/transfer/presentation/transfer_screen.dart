@@ -34,7 +34,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
 
   Future<void> _startIfNeeded() async {
     if (!mounted) return;
-    final active = ref.read(activeTransferProvider);
+    final active = ref.read(focusedTransferProvider);
     if (active != null && active.status != TransferStatus.completed) return;
 
     final files = ref.read(selectedFilesProvider);
@@ -49,7 +49,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     }
 
     final started = await ref
-        .read(activeTransferProvider.notifier)
+        .read(transferSessionProvider.notifier)
         .start(device: device, files: files);
     if (!started && mounted) {
       setState(() {
@@ -61,7 +61,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
   }
 
   void _cancel() {
-    ref.read(activeTransferProvider.notifier).cancel();
+    ref.read(transferSessionProvider.notifier).cancel();
     ref.read(selectedFilesProvider.notifier).state = [];
     ref.read(selectedDeviceProvider.notifier).state = null;
     if (context.canPop()) {
@@ -81,14 +81,14 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
       if (device == null || device.ipAddress != null) return;
       ref.read(selectedDeviceProvider.notifier).state =
           device.copyWith(ipAddress: next.ownerIp);
-      if (ref.read(activeTransferProvider) == null) {
+      if (ref.read(focusedTransferProvider) == null) {
         setState(() => _startError = null);
         _startIfNeeded();
       }
     });
 
-    final transfer = ref.watch(activeTransferProvider);
-    final notifier = ref.read(activeTransferProvider.notifier);
+    final transfer = ref.watch(focusedTransferProvider);
+    final notifier = ref.read(transferSessionProvider.notifier);
     final profile = ref.watch(userProfileProvider);
     final avatarIndex = profile?.avatarIndex ?? 0;
 
