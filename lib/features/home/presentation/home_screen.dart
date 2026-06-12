@@ -20,7 +20,6 @@ import '../../../core/widgets/karlshare_qr.dart';
 import '../../../core/widgets/kente_pattern.dart';
 import '../../../models/device.dart';
 import '../../../models/enums.dart';
-import '../../../models/transfer.dart';
 import '../../../providers/user_provider.dart';
 import '../../history/providers/history_provider.dart';
 import '../../transfer/providers/receive_info_provider.dart';
@@ -72,24 +71,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // An incoming transfer just started — jump to the transfer screen to show
-    // it. Wired on every platform so a PC that's passively listening still
-    // surfaces the transfer. Keyed on a change of transfer id (not prev == null)
-    // so a transfer that arrives right after a previous one finishes still
-    // navigates, even while the old, completed transfer is still in state and
-    // the success screen is on top. The isCurrent guard stops a second push
-    // when a transfer screen is already showing (bidirectional sessions adopt
-    // new incoming transfers into the same session view).
-    ref.listen<Transfer?>(focusedTransferProvider, (prev, next) {
-      if (next != null &&
-          next.direction == TransferDirection.received &&
-          next.status == TransferStatus.transferring &&
-          prev?.id != next.id &&
-          ModalRoute.of(context)?.isCurrent == true) {
-        context.push(RoutePaths.transfer);
-      }
-    });
-
+    // Surfacing an incoming transfer is owned app-wide by
+    // IncomingTransferWatcher (above every route), so no per-screen listener
+    // here — that scattering is exactly what let the "Sent!" screen miss a
+    // reply.
     return _isDesktop ? _buildDesktop(context) : _buildMobile(context);
   }
 

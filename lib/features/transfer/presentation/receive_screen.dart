@@ -6,12 +6,9 @@ import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../core/constants/app_constants.dart';
-import '../../../core/constants/route_paths.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/karlshare_qr.dart';
-import '../../../models/enums.dart';
-import '../../../models/transfer.dart';
 import '../../../providers/user_provider.dart';
 import '../../../services/connect_code.dart';
 import '../../../services/desktop/desktop_net.dart';
@@ -171,16 +168,8 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<KarlshareColors>()!;
 
-    ref.listen<Transfer?>(focusedTransferProvider, (prev, next) {
-      if (next != null &&
-          next.direction == TransferDirection.received &&
-          next.status == TransferStatus.transferring &&
-          prev?.id != next.id &&
-          ModalRoute.of(context)?.isCurrent == true) {
-        context.pushReplacement(RoutePaths.transfer);
-      }
-    });
-
+    // Navigation to the live transfer screen on an incoming transfer is owned
+    // app-wide by IncomingTransferWatcher; this screen just hosts the QR.
     final qr = _qrData;
 
     return Scaffold(

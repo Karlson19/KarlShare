@@ -4,6 +4,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'core/constants/app_constants.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'features/transfer/widgets/incoming_transfer_watcher.dart';
 import 'providers/theme_provider.dart';
 
 class KarlshareApp extends ConsumerWidget {
@@ -23,6 +24,10 @@ class KarlshareApp extends ConsumerWidget {
         darkTheme: AppTheme.dark,
         themeMode: themeMode,
         routerConfig: appRouter,
+        // Sits above every route so an incoming transfer surfaces from any
+        // screen, including the post-send "Sent!" screen.
+        builder: (context, child) =>
+            IncomingTransferWatcher(child: child ?? const SizedBox.shrink()),
       ),
     );
   }
