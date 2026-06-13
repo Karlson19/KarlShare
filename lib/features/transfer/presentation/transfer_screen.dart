@@ -12,11 +12,14 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../core/utils/file_utils.dart';
 import '../../../core/utils/format_utils.dart';
+import '../../../core/widgets/karlshare_avatar.dart';
 import '../../../core/widgets/karlshare_button.dart';
+import '../../../models/device.dart';
 import '../../../models/enums.dart';
 import '../../../models/transfer.dart';
 import '../../../models/transfer_file.dart';
 import '../../../providers/user_provider.dart';
+import '../../file_picker/providers/file_selection_provider.dart';
 import '../../home/providers/discovery_provider.dart';
 import '../providers/transfer_provider.dart';
 import '../widgets/transfer_animation.dart';
@@ -36,7 +39,6 @@ class TransferScreen extends ConsumerStatefulWidget {
 }
 
 class _TransferScreenState extends ConsumerState<TransferScreen> {
-  bool _navigatedDone = false;
   String? _startError;
 
   @override
@@ -100,6 +102,68 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     }
   }
 
+  /// The peer we're connected to, for the "Send to them" action — the most
+  /// recent transfer's device that has a reachable address (the sender on a
+  /// received transfer, the recipient on a sent one). This is what makes the
+  /// connection feel live: send-back is just sending to the same person.
+  Device? _sessionPeer(TransferSession session) {
+    Device? peer;
+    for (final t in session.all) {
+      final ip = t.device.ipAddress;
+      if (ip != null && ip.isNotEmpty) peer = t.device;
+    }
+    return peer;
+  }
+
+  /// Send more files to the connected peer — keeps the device selected and goes
+  /// straight to picking, no re-scan. This is the send-back, promoted to the
+  /// screen's primary action.
+  void _sendTo(Device peer) {
+    HapticFeedback.lightImpact();
+    final notifier = ref.read(transferSessionProvider.notifier);
+    notifier.clearFinished();
+    ref.read(selectedFilesProvider.notifier).state = [];
+    ref.read(fileSelectionProvider.notifier).clear();
+    ref.read(selectedDeviceProvider.notifier).state = peer;
+    context.go(RoutePaths.filePicker);
+  }
+
+  void _done() {
+    ref.read(transferSessionProvider.notifier).clearFinished();
+    ref.read(selectedFilesProvider.notifier).state = [];
+    ref.read(fileSelectionProvider.notifier).clear();
+    ref.read(selectedDeviceProvider.notifier).state = null;
+    context.go(RoutePaths.home);
+  }
+
+  /// The folder a received file landed in, for "Open folder" (desktop).
+  String? _savedDir(TransferSession session) {
+    for (final t in session.received) {
+      for (final f in t.files) {
+        final p = f.path;
+        if (p != null && p.isNotEmpty) {
+          final i = p.lastIndexOf(RegExp(r'[\\/]'));
+          if (i > 0) return p.substring(0, i);
+        }
+      }
+    }
+    return null;
+  }
+
+  void _openFolder(String dir) {
+    try {
+      if (Platform.isWindows) {
+        Process.run('explorer', [dir]);
+      } else if (Platform.isMacOS) {
+        Process.run('open', [dir]);
+      } else if (Platform.isLinux) {
+        Process.run('xdg-open', [dir]);
+      }
+    } catch (_) {
+      // Best effort; the path is shown on screen as a fallback.
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // When group formation completes, merge the peer IP onto the selected
@@ -139,20 +203,12 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     final profile = ref.watch(userProfileProvider);
     final avatarIndex = profile?.avatarIndex ?? 0;
 
-    // The whole session wrapped up with at least one success: celebrate.
     final transfers = session.all;
-    if (transfers.isNotEmpty &&
-        !session.hasActive &&
-        transfers.any((t) => t.status == TransferStatus.completed) &&
-        !_navigatedDone) {
-      _navigatedDone = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        context.pushReplacement(RoutePaths.transferComplete);
-      });
-    }
-
     final focusedActive = _focusedActive(session);
+    // Everything in the session has finished: settle into the connected, done
+    // state instead of bouncing to a separate frozen success screen.
+    final done = transfers.isNotEmpty && !session.hasActive;
+    final peer = _sessionPeer(session);
 
     return Scaffold(
       appBar: AppBar(
@@ -166,7 +222,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
               ? (focusedActive.direction == TransferDirection.sent
                   ? 'Sending to ${focusedActive.device.name}'
                   : 'Receiving from ${focusedActive.device.name}')
-              : 'Transfers',
+              : (peer != null ? peer.name : 'Transfers'),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -179,44 +235,60 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
             child: transfers.isEmpty
                 ? _Pending(error: _startError, onBack: _leave)
                 : Column(
-                children: [
-                  if (notifier.lastError != null &&
-                      transfers.any((t) => t.status == TransferStatus.failed))
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppConstants.space24,
-                        vertical: AppConstants.space8,
-                      ),
-                      child: Text(
-                        notifier.lastError!,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            color: Theme.of(context).colorScheme.error),
-                      ),
-                    ),
-                  if (focusedActive != null)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppConstants.space16,
-                      ),
-                      child: RepaintBoundary(
-                        child: TransferAnimation(
-                          transfer: focusedActive,
-                          meAvatarIndex: avatarIndex,
-                          etaSeconds: _sessionEta(session),
+                    children: [
+                      if (notifier.lastError != null &&
+                          transfers
+                              .any((t) => t.status == TransferStatus.failed))
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppConstants.space24,
+                            vertical: AppConstants.space8,
+                          ),
+                          child: Text(
+                            notifier.lastError!,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.error),
+                          ),
+                        ),
+                      if (done)
+                        _SessionDoneHeader(
+                          session: session,
+                          elapsedSeconds: notifier.elapsedSeconds,
+                        )
+                      else ...[
+                        if (focusedActive != null)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppConstants.space16,
+                            ),
+                            child: RepaintBoundary(
+                              child: TransferAnimation(
+                                transfer: focusedActive,
+                                meAvatarIndex: avatarIndex,
+                                etaSeconds: _sessionEta(session),
+                              ),
+                            ),
+                          ),
+                        _SessionStats(session: session),
+                      ],
+                      Expanded(
+                        child: _SessionList(
+                          session: session,
+                          onCancel: (t) => notifier.cancelById(t.id),
+                          onRetry: _retry,
                         ),
                       ),
-                    ),
-                  _SessionStats(session: session),
-                  Expanded(
-                    child: _SessionList(
-                      session: session,
-                      onCancel: (t) => notifier.cancelById(t.id),
-                      onRetry: _retry,
-                    ),
+                      if (done)
+                        _SessionActionBar(
+                          peer: peer,
+                          savedDir: _savedDir(session),
+                          onSendTo: peer == null ? null : () => _sendTo(peer),
+                          onOpenFolder: _openFolder,
+                          onDone: _done,
+                        ),
+                    ],
                   ),
-                ],
-              ),
           ),
         ),
       ),
@@ -250,6 +322,189 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     }
     if (speed <= 0 || remaining <= 0) return 0;
     return remaining / speed;
+  }
+}
+
+/// The inline "done" celebration: the peer front and centre, a success title
+/// that reflects what actually happened (sent / received / a two-way
+/// exchange), and a one-line summary. Replaces the old separate success route,
+/// so the screen stays live — an incoming reply just turns it active again.
+class _SessionDoneHeader extends StatelessWidget {
+  const _SessionDoneHeader({
+    required this.session,
+    required this.elapsedSeconds,
+  });
+
+  final TransferSession session;
+  final double elapsedSeconds;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).extension<KarlshareColors>()!;
+    final sentDone = session.sent
+        .expand((t) => t.files)
+        .where((f) => f.progress >= 1.0)
+        .length;
+    final receivedDone = session.received
+        .expand((t) => t.files)
+        .where((f) => f.progress >= 1.0)
+        .length;
+    final totalBytes =
+        session.all.fold<int>(0, (s, t) => s + t.transferredBytes);
+    final anyFailed =
+        session.all.any((t) => t.status == TransferStatus.failed);
+
+    final (String title, Color tint) = anyFailed && sentDone + receivedDone == 0
+        ? ('Transfer failed', AppColors.error)
+        : sentDone > 0 && receivedDone > 0
+            ? ('Exchange complete', colors.accent)
+            : receivedDone > 0
+                ? ('Received!', AppColors.forest)
+                : ('Sent!', AppColors.gold);
+
+    final peer = session.all
+        .map((t) => t.device.name)
+        .lastWhere((n) => n.isNotEmpty, orElse: () => '');
+    final count = sentDone + receivedDone;
+    final summary = count == 0
+        ? 'Nothing went through'
+        : '$count ${count == 1 ? "file" : "files"} · '
+            '${FormatUtils.fileSize(totalBytes)}'
+            '${elapsedSeconds > 0 ? " · ${FormatUtils.eta(elapsedSeconds)}" : ""}';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppConstants.space24,
+        AppConstants.space8,
+        AppConstants.space24,
+        AppConstants.space16,
+      ),
+      child: Column(
+        children: [
+          TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.7, end: 1),
+            duration: const Duration(milliseconds: 380),
+            curve: Curves.easeOutBack,
+            builder: (_, scale, child) =>
+                Transform.scale(scale: scale, child: child),
+            child: Stack(
+              alignment: Alignment.bottomRight,
+              children: [
+                KarlshareAvatar(name: peer.isEmpty ? null : peer, size: 64),
+                Container(
+                  decoration: BoxDecoration(
+                    color: tint,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: colors.background, width: 2),
+                  ),
+                  padding: const EdgeInsets.all(2),
+                  child: Icon(
+                    anyFailed && count == 0
+                        ? Icons.close_rounded
+                        : Icons.check_rounded,
+                    size: 14,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppConstants.space12),
+          Text(title, style: Theme.of(context).textTheme.headlineMedium),
+          const SizedBox(height: AppConstants.space4),
+          Text(
+            peer.isEmpty ? summary : '$summary · $peer',
+            textAlign: TextAlign.center,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: colors.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The done-state action bar: send-back promoted to the screen's hero CTA.
+/// Sending more to the connected peer is one tap and skips re-discovery.
+class _SessionActionBar extends StatelessWidget {
+  const _SessionActionBar({
+    required this.peer,
+    required this.savedDir,
+    required this.onSendTo,
+    required this.onOpenFolder,
+    required this.onDone,
+  });
+
+  final Device? peer;
+  final String? savedDir;
+  final VoidCallback? onSendTo;
+  final void Function(String) onOpenFolder;
+  final VoidCallback onDone;
+
+  static final bool _isDesktop =
+      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+
+  // The button centres its label without ellipsis, so keep long hostnames from
+  // overflowing.
+  static String _short(String name) =>
+      name.length > 16 ? '${name.substring(0, 15)}…' : name;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).extension<KarlshareColors>()!;
+    final canOpenFolder = _isDesktop && savedDir != null;
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        AppConstants.space16,
+        AppConstants.space12,
+        AppConstants.space16,
+        AppConstants.space12 + MediaQuery.viewPaddingOf(context).bottom,
+      ),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(top: BorderSide(color: colors.border)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (onSendTo != null) ...[
+            KarlshareButton(
+              label: peer != null ? 'Send to ${_short(peer!.name)}' : 'Send more',
+              icon: Icons.north_east_rounded,
+              onPressed: onSendTo,
+            ),
+            const SizedBox(height: AppConstants.space12),
+          ],
+          Row(
+            children: [
+              if (canOpenFolder) ...[
+                Expanded(
+                  child: KarlshareButton(
+                    label: 'Open folder',
+                    icon: Icons.folder_open_rounded,
+                    variant: KarlshareButtonVariant.secondary,
+                    onPressed: () => onOpenFolder(savedDir!),
+                  ),
+                ),
+                const SizedBox(width: AppConstants.space12),
+              ],
+              Expanded(
+                child: KarlshareButton(
+                  label: 'Done',
+                  variant: onSendTo == null
+                      ? KarlshareButtonVariant.primary
+                      : KarlshareButtonVariant.secondary,
+                  onPressed: onDone,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
 

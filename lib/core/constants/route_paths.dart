@@ -9,7 +9,6 @@ class RoutePaths {
   static const String home = '/home';
   static const String filePicker = '/file-picker';
   static const String transfer = '/transfer';
-  static const String transferComplete = '/transfer/complete';
   static const String receive = '/receive';
   static const String sendConnect = '/send-connect';
   static const String history = '/history';

@@ -23,6 +23,11 @@ class DartTransferEngine {
   SecureServerSocket? _server;
   Directory? _saveDir;
 
+  /// This device's friendly name, sent in the handshake so the peer can show
+  /// "Karlson's phone" instead of a bare IP. Set by the app from the user
+  /// profile (mobile) or hostname (desktop).
+  String localName = '';
+
   /// Platform hook: moves a fully-received, checksum-verified file from the
   /// app-private save dir to wherever the user can see it (Android hands it to
   /// MediaStore so it appears in Gallery/Files). Returns the user-facing
@@ -49,6 +54,7 @@ class DartTransferEngine {
     String? direction,
     String? message,
     String? peerIp,
+    String? peerName,
   }) {
     _controller.add(TransferEvent(
       type: type,
@@ -64,6 +70,7 @@ class DartTransferEngine {
       totalBytes: totalBytes,
       grandTotal: grandTotal,
       direction: direction,
+      peerName: peerName,
       message: message,
       peerIp: peerIp,
     ));
@@ -107,11 +114,16 @@ class DartTransferEngine {
     } catch (_) {
       // Socket may already be torn down; peerIp stays null (no send-back).
     }
+    String? peerName;
     try {
       socket.setOption(SocketOption.tcpNoDelay, true);
       final remote = await Wire.readHandshake(reader.read);
+      peerName = remote.name.isNotEmpty ? remote.name : null;
       socket.add(Wire.handshake(
-          deviceId: id.deviceId, publicKey: id.fingerprint, capabilities: Wire.capTls));
+          deviceId: id.deviceId,
+          publicKey: id.fingerprint,
+          capabilities: Wire.capTls,
+          name: localName));
       await socket.flush();
       await _verifyPeer(socket, remote);
 
@@ -136,6 +148,7 @@ class DartTransferEngine {
               savePath: target.path,
               direction: 'received',
               peerIp: peerIp,
+              peerName: peerName,
             );
             if (h.size == 0) {
               await raf.close();
@@ -247,7 +260,10 @@ class DartTransferEngine {
         socket.setOption(SocketOption.tcpNoDelay, true);
         final reader = StreamByteReader(socket);
         socket.add(Wire.handshake(
-            deviceId: id.deviceId, publicKey: id.fingerprint, capabilities: Wire.capTls));
+            deviceId: id.deviceId,
+            publicKey: id.fingerprint,
+            capabilities: Wire.capTls,
+            name: localName));
         await socket.flush();
         final remote = await Wire.readHandshake(reader.read);
         await _verifyPeer(socket, remote);
@@ -287,6 +303,8 @@ class DartTransferEngine {
     // Events use the caller's file id (the picker's) so the sender UI can match
     // progress to the rows it already shows; the wire keeps its own 16-byte id.
     final fid = f.id ?? _hex(fileId);
+    // The header and chunks ride the same ordered TLS stream, so no flush is
+    // needed between them — TCP preserves order.
     socket.add(Wire.fileHeader(
       fileId: fileId,
       name: f.name,
@@ -294,7 +312,6 @@ class DartTransferEngine {
       mime: f.mime,
       checksum: checksum,
     ));
-    await socket.flush();
     _emit(
       type: TransferEventType.header,
       transferId: transferId,
@@ -308,15 +325,24 @@ class DartTransferEngine {
     var index = 0;
     var fileSent = 0;
     var running = sentTotal;
+    var sinceFlush = 0;
     try {
       while (!_cancelled.contains(transferId)) {
+        // RandomAccessFile.read already returns a Uint8List — pass it straight
+        // through, no extra copy.
         final data = await raf.read(Wire.defaultChunkSize);
         if (data.isEmpty) break;
-        socket.add(Wire.chunk(fileId: fileId, index: index, data: Uint8List.fromList(data)));
-        await socket.flush();
+        socket.add(Wire.chunk(fileId: fileId, index: index, data: data));
         index++;
         fileSent += data.length;
         running += data.length;
+        sinceFlush += data.length;
+        // Pipeline: only drain (and apply backpressure) every few MB, not every
+        // chunk. This bounds in-flight memory while keeping the link busy.
+        if (sinceFlush >= Wire.flushEvery) {
+          await socket.flush();
+          sinceFlush = 0;
+        }
         _emit(
           type: TransferEventType.progress,
           transferId: transferId,

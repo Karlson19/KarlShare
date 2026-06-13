@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
@@ -6,8 +7,29 @@ import '../../../models/device.dart';
 import '../../../models/enums.dart';
 import '../../../models/transfer.dart';
 import '../../../models/transfer_file.dart';
+import '../../../providers/user_provider.dart';
 import '../../../services/transfer_service.dart';
 import '../../history/providers/history_provider.dart';
+
+/// This device's advertised name: the user's profile name, else the OS
+/// hostname. Sent in the transfer handshake so peers show it, not an IP.
+/// Resolving the name must never break a transfer, so the profile read is
+/// guarded — a missing/uninitialised profile just falls back to the hostname.
+String _resolveIdentityName(String? Function() readProfileName) {
+  String? profileName;
+  try {
+    profileName = readProfileName();
+  } catch (_) {
+    // Profile/prefs not ready — fall through to the hostname.
+  }
+  final p = profileName?.trim();
+  if (p != null && p.isNotEmpty) return p;
+  try {
+    return Platform.localHostname;
+  } catch (_) {
+    return 'Karlshare device';
+  }
+}
 
 /// Shared [TransferService] instance.
 final transferServiceProvider = Provider<TransferService>((ref) {
@@ -128,6 +150,8 @@ class TransferSessionNotifier extends StateNotifier<TransferSession> {
   }) async {
     final service = _ref.read(transferServiceProvider);
     if (!service.isPlatformSupported) return false;
+    service.setIdentityName(_resolveIdentityName(
+        () => _ref.read(userProfileProvider)?.displayName));
     final peerIp = device.ipAddress;
     if (peerIp == null || peerIp.isEmpty) return false;
 
@@ -292,9 +316,15 @@ class TransferSessionNotifier extends StateNotifier<TransferSession> {
     // start() call). Adopt it, focus it, and remember the sender for
     // one-tap send-back.
     final peerIp = event.peerIp;
+    final peerName = event.peerName?.trim();
+    // Prefer the name the sender advertised; fall back to a friendly label
+    // (never a bare IP) when an older peer sends no name.
+    final displayName = (peerName != null && peerName.isNotEmpty)
+        ? peerName
+        : 'Nearby device';
     final device = Device(
       id: peerIp ?? 'incoming-${event.transferId}',
-      name: peerIp ?? 'Incoming device',
+      name: displayName,
       status: DeviceStatus.connecting,
       address: peerIp,
       ipAddress: peerIp,
@@ -484,6 +514,10 @@ final receivingProvider = StateProvider<bool>((ref) => false);
 Future<void> startReceiving(WidgetRef ref) async {
   final service = ref.read(transferServiceProvider);
   if (!service.isPlatformSupported) return;
+  // Advertise our name before listening, so a sender's handshake reply (and
+  // the name we send) carries the real device name.
+  service.setIdentityName(
+      _resolveIdentityName(() => ref.read(userProfileProvider)?.displayName));
   await service.startServer();
   // Make sure the listener is wired so incoming events flow into state.
   // ignore: unused_local_variable

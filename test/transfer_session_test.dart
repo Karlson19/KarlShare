@@ -33,7 +33,8 @@ void main() {
   /// Lets stream microtasks and the 33ms coalescing timer drain.
   Future<void> pump() => Future<void>.delayed(const Duration(milliseconds: 80));
 
-  TransferEvent header(String tid, String fid, {String? peerIp = '10.0.0.9'}) =>
+  TransferEvent header(String tid, String fid,
+          {String? peerIp = '10.0.0.9', String? peerName}) =>
       TransferEvent(
         type: TransferEventType.header,
         transferId: tid,
@@ -42,6 +43,7 @@ void main() {
         fileSize: 1000,
         direction: 'received',
         peerIp: peerIp,
+        peerName: peerName,
       );
 
   TransferEvent progress(String tid, String fid, int bytes) => TransferEvent(
@@ -186,6 +188,21 @@ void main() {
         reason: 'an in-flight transfer survives Done');
     expect(session.protocolFilesDone, 0,
         reason: 'integrity baseline shrinks with the session, no false alarms');
+  });
+
+  test('incoming transfer shows the peer name, or a friendly fallback',
+      () async {
+    service.emit(header('named', 'n1', peerName: "Karlson's phone"));
+    // An older peer that sends no name (and no resolvable IP here).
+    service.emit(header('anon', 'a1', peerIp: null, peerName: null));
+    await pump();
+
+    final session = container.read(transferSessionProvider);
+    expect(session.transfers['named']!.device.name, "Karlson's phone");
+    expect(session.transfers['anon']!.device.name, 'Nearby device',
+        reason: 'no bare IP as a device name');
+    // The remembered send-back device carries the real name too.
+    expect(container.read(lastReceivedDeviceProvider)?.name, "Karlson's phone");
   });
 
   test('progress floods coalesce without losing the final value', () async {

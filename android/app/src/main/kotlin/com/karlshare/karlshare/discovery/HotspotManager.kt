@@ -141,6 +141,11 @@ class HotspotManager(
             return
         }
         emit("status", mapOf("message" to "Starting hotspot…"))
+        // NOTE: a normal app cannot choose the hotspot's Wi-Fi band — the
+        // band-config overload of startLocalOnlyHotspot and SoftApConfiguration
+        // .Builder are @SystemApi (OEM/system apps only). The system picks the
+        // band; if it picks 5 GHz, a 2.4-GHz-only phone can't see it. The
+        // in-app mitigation is the swap-roles guidance on the sender screen.
         try {
             wifi.startLocalOnlyHotspot(object : WifiManager.LocalOnlyHotspotCallback() {
                 override fun onStarted(reservation: WifiManager.LocalOnlyHotspotReservation) {

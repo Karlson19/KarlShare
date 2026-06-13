@@ -8,9 +8,22 @@ import 'dart:typed_data';
 class Wire {
   Wire._();
 
-  static const int version = 2;
+  /// v3 appends an optional UTF-8 device name to the handshake (u8 length +
+  /// bytes). Readers gate the name read on version >= 3, so a v3 receiver still
+  /// parses a v2 sender; mixing a v3 sender with a v2 receiver needs both apps
+  /// updated (we already require that across the v1.2 engine swap).
+  static const int version = 3;
   static const int transferPort = 8988;
-  static const int defaultChunkSize = 256 * 1024;
+
+  /// 1 MB chunks. Bigger frames mean fewer per-chunk syscalls/flushes/events,
+  /// which matters far more for throughput than the chunk size itself. Capped
+  /// well under the receiver's 8 MB sanity limit.
+  static const int defaultChunkSize = 1024 * 1024;
+
+  /// The sender drains to the OS (and applies backpressure) once this many
+  /// bytes have been queued, instead of after every chunk — pipelining keeps
+  /// the link saturated while bounding in-flight memory.
+  static const int flushEvery = 4 * 1024 * 1024;
 
   static const int tagFileHeader = 0x02;
   static const int tagChunk = 0x03;
@@ -26,6 +39,7 @@ class Wire {
     required Uint8List deviceId, // 16 bytes
     required Uint8List publicKey, // 32 bytes (sha-256 fingerprint)
     required int capabilities,
+    String name = '',
   }) {
     assert(deviceId.length == 16 && publicKey.length == 32);
     final b = BytesBuilder();
@@ -33,6 +47,11 @@ class Wire {
     b.add(deviceId);
     b.add(publicKey);
     b.addByte(capabilities & 0xFF);
+    // Friendly device name (v3+). Capped at 255 UTF-8 bytes.
+    var nameBytes = utf8.encode(name);
+    if (nameBytes.length > 255) nameBytes = nameBytes.sublist(0, 255);
+    b.addByte(nameBytes.length);
+    b.add(nameBytes);
     return b.toBytes();
   }
 
@@ -85,7 +104,14 @@ class Wire {
     final deviceId = await read(16);
     final publicKey = await read(32);
     final cap = (await read(1))[0];
-    return Handshake(version, deviceId, publicKey, cap);
+    var name = '';
+    if (version >= 3) {
+      final nameLen = (await read(1))[0];
+      if (nameLen > 0) {
+        name = utf8.decode(await read(nameLen), allowMalformed: true);
+      }
+    }
+    return Handshake(version, deviceId, publicKey, cap, name);
   }
 
   /// Reads one tag-prefixed frame, or null on clean EOF.
@@ -157,11 +183,15 @@ class WireError implements Exception {
 }
 
 class Handshake {
-  Handshake(this.version, this.deviceId, this.publicKey, this.capabilities);
+  Handshake(this.version, this.deviceId, this.publicKey, this.capabilities,
+      [this.name = '']);
   final int version;
   final Uint8List deviceId;
   final Uint8List publicKey;
   final int capabilities;
+
+  /// Friendly device name the peer advertised (v3+); empty for older peers.
+  final String name;
 }
 
 class FileHeaderMsg {

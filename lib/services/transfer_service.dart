@@ -66,6 +66,7 @@ class TransferEvent {
     this.attempt = 0,
     this.backoffMs = 0,
     this.peerIp,
+    this.peerName,
   });
 
   final TransferEventType type;
@@ -80,6 +81,10 @@ class TransferEvent {
   /// The remote device's IP on an incoming (received) transfer, so the
   /// receiver can later send files back to it. Null for outgoing transfers.
   final String? peerIp;
+
+  /// The remote device's friendly name (from its handshake), so the receiver
+  /// shows "Karlson's phone" instead of a bare IP. Null/empty for older peers.
+  final String? peerName;
 
   /// Per-file progress (header → fileComplete).
   final int fileBytes;
@@ -145,6 +150,12 @@ class TransferService {
   }
 
   bool get isPlatformSupported => _channelSupported || _useDartEngine;
+
+  /// Sets this device's friendly name, advertised in the transfer handshake so
+  /// the peer shows it instead of a bare IP.
+  void setIdentityName(String name) {
+    if (_useDartEngine) _ensureEngine().localName = name;
+  }
 
   Future<void> startServer() async {
     if (_useDartEngine) {
@@ -247,6 +258,7 @@ class TransferService {
       attempt: (raw['attempt'] as num?)?.toInt() ?? 0,
       backoffMs: (raw['backoffMs'] as num?)?.toInt() ?? 0,
       peerIp: raw['peerIp'] as String?,
+      peerName: raw['peerName'] as String?,
     );
   }
 }
