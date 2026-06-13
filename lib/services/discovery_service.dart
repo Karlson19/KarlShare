@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'desktop/lan_beacon.dart';
+import 'nsd_discovery.dart';
 
 /// Native discovery event types emitted on `karlshare/discovery/events`.
 enum DiscoveryEventType { peerFound, peerLost, groupReady, error }
@@ -118,7 +119,9 @@ class DiscoveryService {
   final MethodChannel _method;
   final EventChannel _events;
   Stream<DiscoveryEvent>? _cached;
+  Stream<DiscoveryEvent>? _merged;
   LanBeacon? _beacon;
+  NsdDiscovery? _nsd;
 
   /// Mobile uses the native WiFi Direct / Multipeer bridge.
   bool get _channelSupported =>
@@ -129,6 +132,11 @@ class DiscoveryService {
       !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
   LanBeacon _ensureBeacon() => _beacon ??= LanBeacon();
+  NsdDiscovery _ensureNsd() => _nsd ??= NsdDiscovery();
+
+  /// The friendly name advertised over mDNS (set from the profile by the
+  /// discovery provider before [start]).
+  set advertisedName(String name) => _ensureNsd().advertisedName = name;
 
   /// True when discovery works on this platform at all.
   bool get isPlatformSupported => _channelSupported || _isDesktop;
@@ -140,6 +148,9 @@ class DiscoveryService {
   }
 
   Future<void> start() async {
+    // Standard mDNS runs on every supported platform, alongside the legacy
+    // source — the union is strictly more reliable than either alone.
+    await _ensureNsd().start();
     if (_isDesktop) {
       await _ensureBeacon().start();
       return;
@@ -149,6 +160,7 @@ class DiscoveryService {
   }
 
   Future<void> stop() async {
+    await _nsd?.stop();
     if (_isDesktop) {
       await _beacon?.stop();
       return;
@@ -178,11 +190,26 @@ class DiscoveryService {
     await _method.invokeMethod<void>('disconnect');
   }
 
-  /// Hot stream of discovery events. On desktop this is the LAN beacon; on
-  /// mobile it is the native EventChannel (cached so subscribers fan out).
+  /// Hot stream of discovery events — the union of mDNS and the legacy source
+  /// (the LAN beacon on desktop, the native EventChannel on mobile). De-dup by
+  /// peer IP happens in the provider, so the same device seen by both sources
+  /// is one radar entry.
   Stream<DiscoveryEvent> events() {
+    return _merged ??= _buildMergedEvents();
+  }
+
+  Stream<DiscoveryEvent> _buildMergedEvents() {
+    final controller = StreamController<DiscoveryEvent>.broadcast();
+    void pipe(Stream<DiscoveryEvent> s) =>
+        s.listen(controller.add, onError: controller.addError);
+    pipe(_ensureNsd().events);
+    pipe(_baseEvents());
+    return controller.stream;
+  }
+
+  Stream<DiscoveryEvent> _baseEvents() {
     if (_isDesktop) return _ensureBeacon().events;
-    if (!_channelSupported) return const Stream.empty();
+    if (!_channelSupported) return const Stream<DiscoveryEvent>.empty();
     return _cached ??= _events
         .receiveBroadcastStream()
         .map(_parse)

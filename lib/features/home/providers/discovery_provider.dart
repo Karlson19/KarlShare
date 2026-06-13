@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../models/device.dart';
 import '../../../models/enums.dart';
+import '../../../providers/user_provider.dart';
 import '../../../services/discovery_service.dart';
 
 /// Shared [DiscoveryService] instance. Overridden in tests with a fake.
@@ -43,6 +44,11 @@ final discoveredDevicesProvider =
     return;
   }
 
+  // Advertise our real name over mDNS so we show up by name on others' radar.
+  final profileName = ref.read(userProfileProvider)?.displayName.trim();
+  if (profileName != null && profileName.isNotEmpty) {
+    service.advertisedName = profileName;
+  }
   await service.start();
   ref.onDispose(() => service.stop());
   yield* _nativeDeviceStream(ref);
