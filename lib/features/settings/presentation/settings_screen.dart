@@ -102,7 +102,7 @@ class SettingsScreen extends ConsumerWidget {
               const _SettingsDivider(),
               _SettingsRow(
                 icon: Icons.favorite_rounded,
-                label: 'Built by Karlshare · Ghana',
+                label: 'Built by Karlson Achegeba · Ghana',
                 onTap: null,
               ),
               const _SettingsDivider(),
