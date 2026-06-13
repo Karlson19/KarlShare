@@ -148,6 +148,10 @@ class DiscoveryService {
   }
 
   Future<void> start() async {
+    // Subscribe the merged pipeline BEFORE starting any source: mDNS can return
+    // cached results the instant discovery starts, and a broadcast stream
+    // doesn't replay to a listener that attaches a moment later.
+    events();
     // Standard mDNS runs on every supported platform, alongside the legacy
     // source — the union is strictly more reliable than either alone.
     await _ensureNsd().start();

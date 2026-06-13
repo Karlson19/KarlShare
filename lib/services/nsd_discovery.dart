@@ -27,6 +27,7 @@ class NsdDiscovery {
   nsd.Registration? _registration;
   nsd.Discovery? _discovery;
   String _localId = '';
+  String? _localIp;
   // service-instance key -> the peer IP we surfaced, so a 'lost' (whose TXT may
   // be empty) still maps back to the address the radar knows.
   final Map<String, String> _addrByKey = {};
@@ -50,6 +51,7 @@ class NsdDiscovery {
 
     final name = advertisedName.trim().isNotEmpty ? advertisedName.trim() : _hostname();
     final ip = await _localIpv4();
+    _localIp = ip;
 
     // Advertise ourselves (best-effort — discovery still works if this fails).
     try {
@@ -97,6 +99,9 @@ class NsdDiscovery {
     // found: prefer the resolved IPv4, fall back to the TXT ip.
     final ip = _firstV4(service.addresses) ?? _txt(txt, 'ip');
     if (ip == null || ip.isEmpty) return; // nothing dialable yet
+    // Belt-and-suspenders self-filter: if the id wasn't in the TXT yet, the
+    // address still tells us it's our own service — never list ourselves.
+    if (ip == _localIp) return;
     _addrByKey[key] = ip;
     _controller.add(DiscoveryEvent.peerFound(DiscoveredPeer(
       address: ip,
