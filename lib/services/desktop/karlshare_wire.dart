@@ -9,10 +9,12 @@ class Wire {
   Wire._();
 
   /// v3 appends an optional UTF-8 device name to the handshake (u8 length +
-  /// bytes). Readers gate the name read on version >= 3, so a v3 receiver still
-  /// parses a v2 sender; mixing a v3 sender with a v2 receiver needs both apps
-  /// updated (we already require that across the v1.2 engine swap).
-  static const int version = 3;
+  /// bytes). v4 adds a fileFooter frame: a v4 sender talking to a v4 receiver
+  /// streams the SHA-256 as it sends and delivers it in a trailing footer
+  /// instead of pre-hashing the whole file before the first byte. Senders gate
+  /// on the RECEIVER's advertised version, so a v4 sender still falls back to
+  /// the v3 header-checksum path for a v3 receiver — backward compatible.
+  static const int version = 4;
   static const int transferPort = 8988;
 
   /// 1 MB chunks. Bigger frames mean fewer per-chunk syscalls/flushes/events,
@@ -29,6 +31,7 @@ class Wire {
   static const int tagChunk = 0x03;
   static const int tagAck = 0x04;
   static const int tagCancel = 0x05;
+  static const int tagFileFooter = 0x06; // v4: fileId + checksum, after data
 
   static const int capParallelChunks = 1 << 1;
   static const int capTls = 1 << 2;
@@ -97,6 +100,17 @@ class Wire {
     return b.toBytes();
   }
 
+  static Uint8List fileFooter({
+    required Uint8List fileId,
+    required Uint8List checksum, // 32 bytes
+  }) {
+    final b = BytesBuilder();
+    b.addByte(tagFileFooter);
+    b.add(fileId);
+    b.add(checksum);
+    return b.toBytes();
+  }
+
   // ---- decode --------------------------------------------------------------
 
   static Future<Handshake> readHandshake(ByteReader read) async {
@@ -149,6 +163,10 @@ class Wire {
       case tagCancel:
         await read(16);
         return const Frame.cancel();
+      case tagFileFooter:
+        final fileId = await read(16);
+        final checksum = await read(32);
+        return Frame.footer(FileFooterMsg(fileId, checksum));
       default:
         throw WireError('unknown frame tag 0x${tagBytes[0].toRadixString(16)}');
     }
@@ -210,27 +228,42 @@ class ChunkMsg {
   final Uint8List data;
 }
 
-enum FrameType { header, chunk, ack, cancel }
+class FileFooterMsg {
+  FileFooterMsg(this.fileId, this.checksum);
+  final Uint8List fileId;
+  final Uint8List checksum;
+}
+
+enum FrameType { header, chunk, ack, cancel, footer }
 
 class Frame {
   const Frame.header(this.header)
       : type = FrameType.header,
-        chunk = null;
+        chunk = null,
+        footer = null;
   const Frame.chunk(this.chunk)
       : type = FrameType.chunk,
-        header = null;
+        header = null,
+        footer = null;
   const Frame.ack()
       : type = FrameType.ack,
         header = null,
-        chunk = null;
+        chunk = null,
+        footer = null;
   const Frame.cancel()
       : type = FrameType.cancel,
+        header = null,
+        chunk = null,
+        footer = null;
+  const Frame.footer(this.footer)
+      : type = FrameType.footer,
         header = null,
         chunk = null;
 
   final FrameType type;
   final FileHeaderMsg? header;
   final ChunkMsg? chunk;
+  final FileFooterMsg? footer;
 }
 
 /// Buffers a byte [Stream] (a socket) and hands out exact-length reads.

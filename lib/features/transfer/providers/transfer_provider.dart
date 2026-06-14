@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../../models/device.dart';
 import '../../../models/enums.dart';
 import '../../../models/transfer.dart';
@@ -131,6 +132,7 @@ class TransferSessionNotifier extends StateNotifier<TransferSession> {
   int _protocolFilesDone = 0;
   Timer? _flushTimer;
   DateTime? _startedAt;
+  bool _wakeOn = false;
 
   // Per-transfer speed sampling (totalBytes deltas over >=200ms windows).
   final Map<String, int> _lastBytes = {};
@@ -387,6 +389,26 @@ class TransferSessionNotifier extends StateNotifier<TransferSession> {
     return speed < 0 ? 0 : speed;
   }
 
+  /// Keep the device awake while a transfer is live. A screen timeout
+  /// otherwise suspends the app and drops Wi-Fi power-save, killing the socket
+  /// mid-transfer. Tied to the session (not a screen), so it holds even if the
+  /// user navigates away, and releases the moment nothing is in flight.
+  void _applyWakelock(bool active) {
+    if (active == _wakeOn) return;
+    _wakeOn = active;
+    unawaited(() async {
+      try {
+        if (active) {
+          await WakelockPlus.enable();
+        } else {
+          await WakelockPlus.disable();
+        }
+      } catch (_) {
+        // Best effort; unsupported platforms (e.g. web) just no-op.
+      }
+    }());
+  }
+
   // ---- Coalesced state emission -------------------------------------------
 
   /// Lazy flush: progress floods collapse into ~30 state emissions per second.
@@ -405,6 +427,7 @@ class TransferSessionNotifier extends StateNotifier<TransferSession> {
       protocolFilesDone: _protocolFilesDone,
     );
     state = next;
+    _applyWakelock(next.hasActive);
     // Session integrity: what the protocol finished must be what the UI shows.
     final rendered = next.renderedReceivedFilesDone;
     if (rendered < _protocolFilesDone) {
@@ -490,6 +513,7 @@ class TransferSessionNotifier extends StateNotifier<TransferSession> {
   void dispose() {
     _flushTimer?.cancel();
     _eventSub?.cancel();
+    _applyWakelock(false);
     super.dispose();
   }
 }

@@ -71,11 +71,12 @@ Future<void> main() async {
   print('2/5  Built a ${data.length}-byte test file.');
 
   File? received;
+  Uint8List? footerChecksum;
   final done = Completer<bool>();
 
-  print('3/5  Starting TLS server on 127.0.0.1:8988...');
+  print('3/5  Starting TLS server on 127.0.0.1:8989...');
   final ss = await SecureServerSocket.bind(
-    InternetAddress.loopbackIPv4, 8988, server.ctx,
+    InternetAddress.loopbackIPv4, 8989, server.ctx,
     requestClientCertificate: false,
   );
   ss.listen((sock) async {
@@ -100,6 +101,7 @@ Future<void> main() async {
         final f = await Wire.readFrame(reader.read);
         if (f == null) break;
         if (f.type == FrameType.chunk) await raf.writeFrom(f.chunk!.data);
+        if (f.type == FrameType.footer) footerChecksum = f.footer!.checksum;
       }
       await raf.close();
       received = out;
@@ -112,7 +114,7 @@ Future<void> main() async {
 
   print('4/5  Client connecting + sending...');
   final sock = await SecureSocket.connect(
-    InternetAddress.loopbackIPv4, 8988,
+    InternetAddress.loopbackIPv4, 8989,
     context: client.ctx, onBadCertificate: (_) => true,
   );
   final reader = StreamByteReader(sock);
@@ -126,9 +128,11 @@ Future<void> main() async {
       '${_eq(serverFp, remote.publicKey) ? "MATCH" : "MISMATCH"}');
 
   final fileId = Uint8List.fromList(List.generate(16, (i) => (i + 7) & 0xFF));
+  // v4 protocol: zero checksum in the header, real checksum in the footer
+  // (sent after the data) — exercises the no-pre-hash streaming path.
   sock.add(Wire.fileHeader(
       fileId: fileId, name: 'src.bin', size: data.length,
-      mime: 'application/octet-stream', checksum: srcHash));
+      mime: 'application/octet-stream', checksum: Uint8List(32)));
   final raf = await src.open();
   var idx = 0;
   while (true) {
@@ -137,6 +141,7 @@ Future<void> main() async {
     sock.add(Wire.chunk(fileId: fileId, index: idx++, data: Uint8List.fromList(c)));
   }
   await raf.close();
+  sock.add(Wire.fileFooter(fileId: fileId, checksum: srcHash));
   await sock.flush();
   await sock.close();
 
@@ -145,9 +150,13 @@ Future<void> main() async {
   var pass = false;
   if (ok && received != null) {
     final recvHash = Uint8List.fromList(sha256.convert(await received!.readAsBytes()).bytes);
-    pass = _eq(recvHash, srcHash);
+    final bytesOk = _eq(recvHash, srcHash);
+    final footerOk = footerChecksum != null && _eq(footerChecksum!, srcHash);
+    pass = bytesOk && footerOk;
     print('     received ${(await received!.length())} bytes, checksum '
-        '${pass ? "MATCHES" : "DOES NOT MATCH"}');
+        '${bytesOk ? "MATCHES" : "DOES NOT MATCH"}');
+    print('     v4 footer checksum '
+        '${footerOk ? "RECEIVED + MATCHES" : "MISSING/MISMATCH"}');
   } else {
     print('     transfer did not complete');
   }

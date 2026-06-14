@@ -119,6 +119,9 @@ class DartTransferEngine {
       socket.setOption(SocketOption.tcpNoDelay, true);
       final remote = await Wire.readHandshake(reader.read);
       peerName = remote.name.isNotEmpty ? remote.name : null;
+      // v4 senders deliver the checksum in a trailing footer; finalise on the
+      // footer for them, on bytes-complete for v3 (header checksum).
+      final awaitFooter = remote.version >= 4;
       socket.add(Wire.handshake(
           deviceId: id.deviceId,
           publicKey: id.fingerprint,
@@ -136,7 +139,7 @@ class DartTransferEngine {
             final fid = _hex(h.fileId);
             final target = await _uniqueFile(h.name);
             final raf = await target.open(mode: FileMode.write);
-            open[fid] = _RecvFile(h, target, raf);
+            open[fid] = _RecvFile(h, target, raf, awaitFooter: awaitFooter);
             grand += h.size;
             _emit(
               type: TransferEventType.header,
@@ -150,8 +153,8 @@ class DartTransferEngine {
               peerIp: peerIp,
               peerName: peerName,
             );
-            if (h.size == 0) {
-              await raf.close();
+            // A zero-byte v3 file has no chunks and no footer — finish now.
+            if (h.size == 0 && !awaitFooter) {
               final rf = open.remove(fid)!;
               await _finish(rf, transferId, fid);
             }
@@ -174,11 +177,20 @@ class DartTransferEngine {
               totalBytes: recvTotal,
               grandTotal: grand,
             );
-            if (rf.received >= rf.header.size) {
-              await rf.raf.close();
+            // v3: all bytes in → verify against the header checksum.
+            // v4: wait for the footer (it carries the checksum).
+            if (rf.received >= rf.header.size && !rf.awaitFooter) {
               open.remove(fid);
               await _finish(rf, transferId, fid);
             }
+            break;
+          case FrameType.footer:
+            final f = frame.footer!;
+            final fid = _hex(f.fileId);
+            final rf = open.remove(fid);
+            if (rf == null) break;
+            rf.expectedChecksum = f.checksum;
+            await _finish(rf, transferId, fid);
             break;
           case FrameType.ack:
             break;
@@ -207,7 +219,10 @@ class DartTransferEngine {
   }
 
   Future<void> _finish(_RecvFile rf, String transferId, String fid) async {
-    final ok = _bytesEqual(rf.finishDigest(), rf.header.checksum);
+    try {
+      await rf.raf.close();
+    } catch (_) {}
+    final ok = _bytesEqual(rf.finishDigest(), rf.expectedChecksum);
     if (!ok) {
       // Never leave a corrupt file where the user will find it.
       try {
@@ -267,11 +282,16 @@ class DartTransferEngine {
         await socket.flush();
         final remote = await Wire.readHandshake(reader.read);
         await _verifyPeer(socket, remote);
+        // v4 receivers accept a checksum footer, so we can stream the hash as
+        // we send instead of pre-reading the whole file first. Fall back to the
+        // header-checksum path for older receivers.
+        final useFooter = remote.version >= 4;
 
         var sentTotal = 0;
         for (final f in files) {
           if (_cancelled.contains(transferId)) break;
-          sentTotal = await _sendOne(socket, f, transferId, sentTotal, grand);
+          sentTotal =
+              await _sendOne(socket, f, transferId, sentTotal, grand, useFooter);
         }
         // Graceful close so every queued chunk is delivered before the FIN —
         // a hard destroy() here can truncate the last chunk and fail the
@@ -295,14 +315,23 @@ class DartTransferEngine {
     return transferId;
   }
 
-  Future<int> _sendOne(
-      SecureSocket socket, OutgoingFile f, String transferId, int sentTotal, int grand) async {
+  Future<int> _sendOne(SecureSocket socket, OutgoingFile f, String transferId,
+      int sentTotal, int grand, bool useFooter) async {
     final file = File(f.path);
-    final checksum = await _sha256File(file);
     final fileId = _rand16();
     // Events use the caller's file id (the picker's) so the sender UI can match
     // progress to the rows it already shows; the wire keeps its own 16-byte id.
     final fid = f.id ?? _hex(fileId);
+
+    // v4: the checksum rides a trailing footer, computed AS we stream — no
+    // pre-read of the whole file, so a big transfer starts instantly. The
+    // header checksum is zeroed and ignored by a v4 receiver.
+    // v3: pre-hash the file and put the checksum in the header (legacy path).
+    final headerChecksum = useFooter ? Uint8List(32) : await _sha256File(file);
+    final digestOut = useFooter ? _DigestSink() : null;
+    final ByteConversionSink? digestIn =
+        digestOut == null ? null : sha256.startChunkedConversion(digestOut);
+
     // The header and chunks ride the same ordered TLS stream, so no flush is
     // needed between them — TCP preserves order.
     socket.add(Wire.fileHeader(
@@ -310,7 +339,7 @@ class DartTransferEngine {
       name: f.name,
       size: f.size,
       mime: f.mime,
-      checksum: checksum,
+      checksum: headerChecksum,
     ));
     _emit(
       type: TransferEventType.header,
@@ -333,6 +362,7 @@ class DartTransferEngine {
         final data = await raf.read(Wire.defaultChunkSize);
         if (data.isEmpty) break;
         socket.add(Wire.chunk(fileId: fileId, index: index, data: data));
+        digestIn?.add(data);
         index++;
         fileSent += data.length;
         running += data.length;
@@ -355,6 +385,14 @@ class DartTransferEngine {
       }
     } finally {
       await raf.close();
+    }
+
+    if (digestIn != null && digestOut != null) {
+      digestIn.close();
+      socket.add(Wire.fileFooter(
+        fileId: fileId,
+        checksum: Uint8List.fromList(digestOut.value!.bytes),
+      ));
     }
     return running;
   }
@@ -456,11 +494,21 @@ class TransferSecurityError implements Exception {
 }
 
 class _RecvFile {
-  _RecvFile(this.header, this.target, this.raf);
+  _RecvFile(this.header, this.target, this.raf, {this.awaitFooter = false})
+      : expectedChecksum = header.checksum;
   final FileHeaderMsg header;
   final File target;
   final RandomAccessFile raf;
   int received = 0;
+
+  /// v4 senders deliver the checksum in a trailing footer (so they don't
+  /// pre-hash the whole file): wait for it instead of finalising when the
+  /// bytes are all in. v3 senders put it in the header.
+  final bool awaitFooter;
+
+  /// The checksum to verify against — the header's for v3, overwritten by the
+  /// footer for v4.
+  Uint8List expectedChecksum;
 
   // SHA-256 folded in as chunks arrive, so verification at the end is free —
   // no re-reading a (possibly huge) file from disk after the transfer.
